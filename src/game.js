@@ -11,67 +11,224 @@ class GameScene extends Phaser.Scene {
     this.enemiesDefeated = 0;
     this.isChoosingUpgrade = false;
     this.upgradeChoices = [];
-    this.tongueRange = 100;
-    this.attackCooldown = 250;
+    this.tongueRange = 120;
+    this.attackCooldown = 220;
     this.lastAttackTime = 0;
     this.isAttacking = false;
     this.tongue = null;
-    this.speed = 200;
+    this.tongueTip = null;
+    this.speed = 220;
     this.upgradeUI = [];
     this.worldWidth = 800;
     this.worldHeight = 600;
+    // Visual polish
+    this.bg = null;
+    this.shadow = null;
+    this.hitParticles = null;
+    this.hitEmitter = null;
   }
 
   preload() {
-    // Generate placeholder textures to run without external assets
-    // Gecko
-    const g1 = this.make.graphics({ x: 0, y: 0, add: false });
-    g1.fillStyle(0x00ff66, 1);
-    g1.fillRoundedRect(0, 0, 60, 34, 16);
-    g1.fillStyle(0x00cc55, 1);
-    g1.fillCircle(12, 17, 7);
-    g1.generateTexture('gecko', 60, 34);
-    g1.destroy();
+    // Procedural textures for richer visuals (no external assets)
 
-    // Sunglasses
-    const sg = this.make.graphics({ x: 0, y: 0, add: false });
-    sg.fillStyle(0x000000, 1);
-    sg.fillRoundedRect(0, 0, 34, 10, 5);
-    sg.fillStyle(0x333333, 1);
-    sg.fillRect(16, 2, 2, 6);
-    sg.generateTexture('sunglasses', 34, 10);
-    sg.destroy();
+    // Ground tile
+    {
+      const g = this.make.graphics({ x: 0, y: 0, add: false });
+      g.fillStyle(0x0b2012, 1);
+      g.fillRect(0, 0, 64, 64);
+      // blades
+      for (let i = 0; i < 70; i++) {
+        const x = Phaser.Math.Between(0, 60);
+        const y = Phaser.Math.Between(0, 60);
+        const h = Phaser.Math.Between(4, 10);
+        g.fillStyle(Phaser.Math.Between(0, 1) ? 0x1e6b3f : 0x2b8c54, 1);
+        g.fillTriangle(x, y + h, x + 2, y, x + 4, y + h);
+      }
+      // subtle speckles
+      g.fillStyle(0x0e2a17, 0.25);
+      for (let i = 0; i < 30; i++) {
+        const x = Phaser.Math.Between(0, 63);
+        const y = Phaser.Math.Between(0, 63);
+        g.fillRect(x, y, 1, 1);
+      }
+      g.generateTexture('ground_tile', 64, 64);
+      g.destroy();
+    }
 
-    // Enemy
-    const eg = this.make.graphics({ x: 0, y: 0, add: false });
-    eg.fillStyle(0xff4444, 1);
-    eg.fillCircle(16, 16, 16);
-    eg.lineStyle(2, 0x770000, 1);
-    eg.strokeCircle(16, 16, 16);
-    eg.generateTexture('enemy', 32, 32);
-    eg.destroy();
+    // Player drop shadow
+    {
+      const sh = this.make.graphics({ x: 0, y: 0, add: false });
+      sh.fillStyle(0x000000, 1);
+      sh.fillEllipse(32, 16, 64, 24);
+      sh.generateTexture('shadow_oval', 64, 32);
+      sh.destroy();
+    }
+
+    // Detailed Gecko sprite
+    {
+      const g1 = this.make.graphics({ x: 0, y: 0, add: false });
+      // Tail
+      g1.fillStyle(0x26a269, 1);
+      g1.fillPoints([{ x: 14, y: 32 }, { x: 2, y: 24 }, { x: 2, y: 40 }], true);
+      // Body
+      g1.fillStyle(0x2ec27e, 1);
+      g1.fillEllipse(48, 34, 72, 36);
+      // Belly highlight
+      g1.fillStyle(0x9ae6b9, 1);
+      g1.fillEllipse(42, 38, 42, 20);
+      // Head
+      g1.fillStyle(0x2ec27e, 1);
+      g1.fillEllipse(76, 28, 28, 22);
+      // Spots
+      g1.fillStyle(0x238c6a, 1);
+      g1.fillCircle(52, 24, 4);
+      g1.fillCircle(40, 30, 3);
+      g1.fillCircle(60, 38, 3);
+      g1.fillCircle(68, 22, 3);
+      // Legs
+      g1.fillStyle(0x207a5c, 1);
+      g1.fillEllipse(36, 52, 16, 6);
+      g1.fillEllipse(24, 48, 16, 6);
+      g1.fillEllipse(56, 52, 16, 6);
+      g1.fillEllipse(68, 48, 16, 6);
+      // Eye
+      g1.fillStyle(0xffffff, 1);
+      g1.fillCircle(86, 24, 5);
+      g1.fillStyle(0x000000, 1);
+      g1.fillCircle(88, 24, 2);
+      g1.fillStyle(0xffffff, 1);
+      g1.fillCircle(89, 23, 1);
+      // Outline
+      g1.lineStyle(2, 0x0e3b2e, 0.6);
+      g1.strokeEllipse(48, 34, 72, 36);
+      g1.strokeEllipse(76, 28, 28, 22);
+      g1.generateTexture('gecko', 96, 64);
+      g1.destroy();
+    }
+
+    // Sunglasses with reflection
+    {
+      const sg = this.make.graphics({ x: 0, y: 0, add: false });
+      sg.fillStyle(0x0b0b0b, 1);
+      sg.fillRoundedRect(0, 0, 22, 12, 4);
+      sg.fillRoundedRect(24, 0, 22, 12, 4);
+      sg.fillStyle(0x161616, 1);
+      sg.fillRect(22, 4, 2, 4);
+      sg.lineStyle(2, 0x1a1a1a, 1);
+      sg.strokeRoundedRect(0, 0, 22, 12, 4);
+      sg.strokeRoundedRect(24, 0, 22, 12, 4);
+      sg.fillStyle(0xffffff, 0.15);
+      sg.fillTriangle(2, 2, 14, 2, 2, 10);
+      sg.fillTriangle(26, 2, 38, 2, 26, 10);
+      sg.generateTexture('sunglasses', 46, 12);
+      sg.destroy();
+    }
+
+    // Enemies: beetle
+    {
+      const eg = this.make.graphics({ x: 0, y: 0, add: false });
+      // Legs
+      eg.lineStyle(2, 0x3a0d0d, 1);
+      eg.beginPath();
+      eg.moveTo(10, 24); eg.lineTo(2, 30);
+      eg.moveTo(16, 26); eg.lineTo(8, 32);
+      eg.moveTo(28, 26); eg.lineTo(36, 32);
+      eg.moveTo(22, 24); eg.lineTo(30, 30);
+      eg.strokePath();
+      // Shell
+      eg.fillStyle(0x8c1d1d, 1);
+      eg.fillEllipse(20, 16, 36, 24);
+      // Highlight
+      eg.fillStyle(0xb23333, 1);
+      eg.fillEllipse(20, 12, 26, 14);
+      // Head
+      eg.fillStyle(0x4a1212, 1);
+      eg.fillCircle(8, 16, 7);
+      // Eyes
+      eg.fillStyle(0xffffff, 1);
+      eg.fillCircle(6, 14, 2);
+      eg.fillCircle(10, 14, 2);
+      eg.fillStyle(0x000000, 1);
+      eg.fillCircle(6, 14, 1);
+      eg.fillCircle(10, 14, 1);
+      // Ridge
+      eg.lineStyle(1, 0x3a0d0d, 0.6);
+      eg.strokeEllipse(20, 16, 34, 22);
+      eg.generateTexture('enemy_beetle', 40, 32);
+      eg.destroy();
+    }
+
+    // Enemies: fly
+    {
+      const fg = this.make.graphics({ x: 0, y: 0, add: false });
+      // Wings
+      fg.fillStyle(0xccddff, 0.45);
+      fg.fillEllipse(26, 10, 16, 10);
+      fg.fillEllipse(26, 22, 16, 10);
+      // Body
+      fg.fillStyle(0x2e2e38, 1);
+      fg.fillEllipse(16, 16, 24, 18);
+      // Head
+      fg.fillStyle(0x3a3a46, 1);
+      fg.fillCircle(6, 16, 7);
+      // Eye
+      fg.fillStyle(0xffffff, 1);
+      fg.fillCircle(4, 14, 2);
+      fg.fillStyle(0x000000, 1);
+      fg.fillCircle(4, 14, 1);
+      // Segment line
+      fg.lineStyle(1, 0x1f1f27, 0.6);
+      fg.strokeEllipse(16, 16, 20, 14);
+      fg.generateTexture('enemy_fly', 40, 32);
+      fg.destroy();
+    }
+
+    // Tongue tip + splat particle
+    {
+      const tg = this.make.graphics({ x: 0, y: 0, add: false });
+      tg.fillStyle(0xff94c2, 1);
+      tg.fillCircle(6, 6, 6);
+      tg.fillStyle(0xffffff, 0.5);
+      tg.fillCircle(9, 4, 2);
+      tg.generateTexture('tongue_tip', 12, 12);
+      tg.destroy();
+
+      const sp = this.make.graphics({ x: 0, y: 0, add: false });
+      sp.fillStyle(0xff7fb4, 1);
+      sp.fillCircle(4, 4, 4);
+      sp.generateTexture('splat_particle', 8, 8);
+      sp.destroy();
+    }
 
     // Upgrade panel background
-    const bg = this.make.graphics({ x: 0, y: 0, add: false });
-    bg.fillStyle(0x222222, 0.95);
-    bg.fillRoundedRect(0, 0, 520, 360, 12);
-    bg.lineStyle(2, 0xffffff, 0.2);
-    bg.strokeRoundedRect(1, 1, 518, 358, 12);
-    bg.generateTexture('upgrade_bg', 520, 360);
-    bg.destroy();
+    {
+      const bg = this.make.graphics({ x: 0, y: 0, add: false });
+      bg.fillStyle(0x222222, 0.95);
+      bg.fillRoundedRect(0, 0, 520, 360, 12);
+      bg.lineStyle(2, 0xffffff, 0.2);
+      bg.strokeRoundedRect(1, 1, 518, 358, 12);
+      bg.generateTexture('upgrade_bg', 520, 360);
+      bg.destroy();
+    }
   }
 
   create() {
     // World bounds
     this.physics.world.setBounds(0, 0, this.worldWidth, this.worldHeight);
 
+    // Background
+    this.bg = this.add.tileSprite(0, 0, this.worldWidth, this.worldHeight, 'ground_tile').setOrigin(0).setDepth(0);
+
     // Player
     this.player = this.physics.add.sprite(this.worldWidth / 2, this.worldHeight / 2, 'gecko');
     this.player.setCollideWorldBounds(true);
     this.player.setDepth(5);
 
+    // Shadow under player (not physics)
+    this.shadow = this.add.image(this.player.x, this.player.y + 18, 'shadow_oval').setAlpha(0.35).setDepth(1);
+
     // Sunglasses follow sprite (not a physics child)
-    this.sunglasses = this.add.sprite(this.player.x, this.player.y - 8, 'sunglasses');
+    this.sunglasses = this.add.sprite(this.player.x, this.player.y - 6, 'sunglasses');
     this.sunglasses.setDepth(10);
 
     // Input
@@ -81,15 +238,35 @@ class GameScene extends Phaser.Scene {
     // Tongue visualization
     this.tongue = this.add.graphics();
     this.tongue.setDepth(9);
+    this.tongueTip = this.add.image(0, 0, 'tongue_tip').setVisible(false).setDepth(10);
+
+    // Particles for hits
+    this.hitEmitter = this.add.particles(0, 0, 'splat_particle', {
+      speed: { min: 40, max: 200 },
+      angle: { min: 0, max: 360 },
+      scale: { start: 0.7, end: 0 },
+      alpha: { start: 1, end: 0 },
+      gravityY: 300,
+      lifespan: 500,
+      quantity: 0,
+      blendMode: 'ADD',
+      emitting: false
+    });
 
     // Enemies
     this.enemies = this.physics.add.group();
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 8; i++) {
       this.spawnEnemy();
     }
 
-    // Simple text UI
-    this.killsText = this.add.text(8, 8, 'Kills: 0', { fontFamily: 'monospace', fontSize: '14px', color: '#ffffff' }).setDepth(20);
+    // Text UI
+    this.killsText = this.add.text(8, 8, 'Kills: 0', {
+      fontFamily: 'monospace',
+      fontSize: '16px',
+      color: '#eaffea'
+    }).setDepth(20);
+    this.killsText.setStroke('#000000', 3);
+    this.killsText.setShadow(0, 2, '#000000', 2, true, true);
   }
 
   update() {
@@ -105,13 +282,20 @@ class GameScene extends Phaser.Scene {
     if (this.cursors.down.isDown) vy += speed;
     this.player.setVelocity(vx, vy);
 
-    // Keep sunglasses aligned
-    this.sunglasses.setPosition(this.player.x + (this.lastDirection.x * 4), this.player.y - 8 + (this.lastDirection.y * 2));
-
     // Update last facing direction
     if (vx !== 0 || vy !== 0) {
       this.lastDirection.set(vx, vy).normalize();
     }
+    const angle = Math.atan2(this.lastDirection.y, this.lastDirection.x);
+
+    // Rotate player to face direction
+    this.player.setRotation(angle);
+
+    // Keep shadow and sunglasses aligned
+    const headOffset = new Phaser.Math.Vector2(18, -6).rotate(angle);
+    this.sunglasses.setPosition(this.player.x + headOffset.x, this.player.y + headOffset.y);
+    this.sunglasses.setRotation(angle);
+    this.shadow.setPosition(this.player.x, this.player.y + 18);
 
     // Attack input (space)
     const now = this.time.now;
@@ -124,17 +308,25 @@ class GameScene extends Phaser.Scene {
   }
 
   performTongueAttack() {
-    // Draw attack
+    // Draw attack with layered color for depth
     const start = this.player.getCenter();
     const len = this.tongueRange;
     const end = new Phaser.Math.Vector2(start.x + this.lastDirection.x * len, start.y + this.lastDirection.y * len);
 
     this.tongue.clear();
-    this.tongue.lineStyle(8, 0xff69b4, 1);
+    this.tongue.lineStyle(12, 0xd94884, 0.9);
     this.tongue.beginPath();
     this.tongue.moveTo(start.x, start.y);
     this.tongue.lineTo(end.x, end.y);
     this.tongue.strokePath();
+    this.tongue.lineStyle(6, 0xff94c2, 1);
+    this.tongue.beginPath();
+    this.tongue.moveTo(start.x, start.y);
+    this.tongue.lineTo(end.x, end.y);
+    this.tongue.strokePath();
+
+    // Tongue tip
+    this.tongueTip.setPosition(end.x, end.y).setVisible(true);
 
     // Damage enemies along line
     const line = new Phaser.Geom.Line(start.x, start.y, end.x, end.y);
@@ -144,6 +336,21 @@ class GameScene extends Phaser.Scene {
       const e = enemies[i];
       if (!e.active) continue;
       if (Phaser.Geom.Intersects.LineToRectangle(line, e.getBounds())) {
+        // FX
+        this.hitEmitter.explode(Phaser.Math.Between(8, 12), e.x, e.y);
+        this.cameras.main.shake(100, 0.004);
+        const pop = this.add.image(e.x, e.y, e.texture.key).setDepth((e.depth || 4) + 1);
+        pop.setScale(e.scaleX || 1, e.scaleY || 1);
+        this.tweens.add({
+          targets: pop,
+          y: e.y - 6,
+          scale: (e.scaleX || 1) * 1.2,
+          alpha: 0,
+          duration: 200,
+          ease: 'Quad.easeOut',
+          onComplete: () => pop.destroy()
+        });
+
         e.destroy();
         this.enemiesDefeated++;
         killsThisAttack++;
@@ -159,8 +366,9 @@ class GameScene extends Phaser.Scene {
     }
 
     // Retract tongue shortly after
-    this.time.delayedCall(150, () => {
+    this.time.delayedCall(160, () => {
       this.tongue.clear();
+      this.tongueTip.setVisible(false);
     });
   }
 
@@ -168,12 +376,28 @@ class GameScene extends Phaser.Scene {
     const margin = 40;
     const x = Phaser.Math.Between(margin, this.worldWidth - margin);
     const y = Phaser.Math.Between(margin, this.worldHeight - margin);
-    const enemy = this.enemies.create(x, y, 'enemy');
+    const type = Phaser.Math.Between(0, 1) === 0 ? 'enemy_beetle' : 'enemy_fly';
+    const enemy = this.enemies.create(x, y, type);
+    enemy.setData('type', type);
     enemy.setCollideWorldBounds(true);
-    // Give a small random drift
-    const sp = Phaser.Math.Between(40, 80);
-    const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
-    enemy.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp);
+    enemy.setDepth(4);
+    if (type === 'enemy_beetle') {
+      const sp = Phaser.Math.Between(40, 80);
+      const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
+      enemy.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp);
+    } else {
+      const sp = Phaser.Math.Between(70, 120);
+      const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
+      enemy.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp);
+      this.tweens.add({
+        targets: enemy,
+        scale: { from: 0.95, to: 1.08 },
+        duration: 360,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut'
+      });
+    }
   }
 
   showUpgradeSelection() {
@@ -188,6 +412,7 @@ class GameScene extends Phaser.Scene {
       fontSize: '28px',
       color: '#ffffff'
     }).setOrigin(0.5).setDepth(32);
+    title.setShadow(0, 3, '#000000', 3, true, true);
 
     this.upgradeChoices = this.getRandomUpgrades(3);
 
@@ -200,6 +425,8 @@ class GameScene extends Phaser.Scene {
         padding: { x: 18, y: 12 },
         align: 'center'
       }).setOrigin(0.5).setDepth(32).setInteractive({ useHandCursor: true });
+      btn.setStroke('#000000', 2);
+      btn.setShadow(0, 2, '#000000', 2, true, true);
       btn.on('pointerover', () => btn.setStyle({ backgroundColor: '#555555' }));
       btn.on('pointerout', () => btn.setStyle({ backgroundColor: '#333333' }));
       btn.on('pointerdown', onClick);
