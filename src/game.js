@@ -153,8 +153,8 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    // Show upgrade every 3 kills
-    if (killsThisAttack > 0 && this.enemiesDefeated % 3 === 0 && !this.isChoosingUpgrade) {
+    // Show upgrade every 10 kills
+    if (killsThisAttack > 0 && this.enemiesDefeated % 10 === 0 && !this.isChoosingUpgrade) {
       this.showUpgradeSelection();
     }
 
