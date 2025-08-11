@@ -26,6 +26,17 @@ class GameScene extends Phaser.Scene {
     this.armorDropChance = 0.15; // 15% chance to drop armor on enemy death
     this.hasArmor = false;
     this.armorOverlay = null;
+    // Spray weapon pickups
+    this.sprayCans = null;
+    this.sprayDropChance = 0.12; // 12% chance to drop a spray can on enemy death
+    this.sprayUses = 0;
+    this.maxSprayUses = 5;
+    this.sprayCanOverlay = null;
+    this.sprayGfx = null;
+    this.sprayEmitter = null;
+    this.sprayRange = 200;
+    this.sprayHalfAngle = Phaser.Math.DegToRad(25);
+    this.sprayText = null;
     // Upgrades / combat
     this.isChoosingUpgrade = false;
     this.upgradeChoices = [];
@@ -432,6 +443,50 @@ class GameScene extends Phaser.Scene {
       og.destroy();
     }
     
+    // Spray can pickup texture
+    {
+      const sc = this.make.graphics({ x: 0, y: 0, add: false });
+      // Can body
+      sc.fillStyle(0xc62828, 1);
+      sc.fillRoundedRect(6, 8, 20, 20, 4);
+      // Label circle
+      sc.fillStyle(0xffffee, 0.85);
+      sc.fillCircle(16, 18, 6);
+      // "Bug" icon
+      sc.fillStyle(0x000000, 1);
+      sc.fillCircle(16, 18, 2);
+      sc.lineStyle(2, 0x000000, 1);
+      sc.beginPath();
+      sc.moveTo(13, 14); sc.lineTo(11, 12);
+      sc.moveTo(13, 22); sc.lineTo(11, 24);
+      sc.moveTo(19, 14); sc.lineTo(21, 12);
+      sc.moveTo(19, 22); sc.lineTo(21, 24);
+      sc.strokePath();
+      // Top cap + nozzle
+      sc.fillStyle(0xb0bec5, 1);
+      sc.fillRect(10, 6, 12, 4);
+      sc.fillStyle(0xeeeeee, 1);
+      sc.fillRect(18, 4, 4, 4);
+      sc.fillStyle(0x000000, 1);
+      sc.fillRect(20, 4, 2, 2);
+      // Gloss
+      sc.fillStyle(0xffffff, 0.18);
+      sc.fillRoundedRect(8, 10, 8, 6, 3);
+      sc.generateTexture('spray_can', 32, 32);
+      sc.destroy();
+    }
+
+    // Spray particle texture
+    {
+      const pp = this.make.graphics({ x: 0, y: 0, add: false });
+      pp.fillStyle(0xe8fff4, 0.95);
+      pp.fillCircle(4, 4, 3.5);
+      pp.fillStyle(0xffffff, 0.35);
+      pp.fillCircle(5, 3, 1.2);
+      pp.generateTexture('spray_particle', 8, 8);
+      pp.destroy();
+    }
+
     // Upgrade panel background
     {
       const bg = this.make.graphics({ x: 0, y: 0, add: false });
@@ -469,6 +524,7 @@ class GameScene extends Phaser.Scene {
     this.attackCooldown = 220;
     this.lastAttackTime = 0;
     this.lastDirection = new Phaser.Math.Vector2(1, 0);
+    this.sprayUses = 0;
 
     // Clear transient refs
     this.tongue = null;
@@ -522,6 +578,11 @@ class GameScene extends Phaser.Scene {
     // Armor overlay (non-physics); shown when armor is equipped
     this.armorOverlay = this.add.image(this.player.x, this.player.y, 'armor_overlay').setVisible(false);
     this.armorOverlay.setDepth(8).setAlpha(0.7);
+
+    // Spray can overlay (shows when holding spray weapon)
+    this.sprayCanOverlay = this.add.image(this.player.x, this.player.y, 'spray_can').setVisible(false);
+    this.sprayCanOverlay.setDepth(11);
+    this.sprayCanOverlay.setScale(0.8);
     
     // Input
     this.cursors = this.input.keyboard.createCursorKeys();
@@ -531,6 +592,21 @@ class GameScene extends Phaser.Scene {
     this.tongue = this.add.graphics();
     this.tongue.setDepth(9);
     this.tongueTip = this.add.image(0, 0, 'tongue_tip').setVisible(false).setDepth(10);
+
+    // Spray visualization
+    this.sprayGfx = this.add.graphics();
+    this.sprayGfx.setDepth(9);
+    this.sprayEmitter = this.add.particles(0, 0, 'spray_particle', {
+      speed: { min: 20, max: 120 },
+      angle: { min: -10, max: 10 },
+      gravityY: 0,
+      scale: { start: 1.0, end: 0 },
+      alpha: { start: 0.9, end: 0 },
+      lifespan: 260,
+      quantity: 0,
+      emitting: false,
+      blendMode: 'ADD'
+    });
 
     // Particles for hits
     this.hitEmitter = this.add.particles(0, 0, 'splat_particle', {
@@ -562,6 +638,10 @@ class GameScene extends Phaser.Scene {
     // Armor pickups
     this.armors = this.physics.add.group({ allowGravity: false, immovable: true });
     this.physics.add.overlap(this.player, this.armors, this.onPlayerArmorOverlap, null, this);
+
+    // Spray can pickups
+    this.sprayCans = this.physics.add.group({ allowGravity: false, immovable: true });
+    this.physics.add.overlap(this.player, this.sprayCans, this.onPlayerSprayOverlap, null, this);
     
     // Text UI
     this.killsText = this.add.text(8, 8, 'Kills: 0', {
@@ -640,6 +720,13 @@ class GameScene extends Phaser.Scene {
       this.armorOverlay.setRotation(angle);
       this.armorOverlay.setVisible(this.hasArmor);
     }
+    // Spray can overlay follows player when active
+    if (this.sprayCanOverlay) {
+      const handOffset = new Phaser.Math.Vector2(20, 4).rotate(angle);
+      this.sprayCanOverlay.setPosition(this.player.x + handOffset.x, this.player.y + handOffset.y);
+      this.sprayCanOverlay.setRotation(angle + 0.2);
+      this.sprayCanOverlay.setVisible(this.sprayUses > 0);
+    }
     
     // Invulnerability blink
     const inv = now < this.invulnUntil;
@@ -653,7 +740,11 @@ class GameScene extends Phaser.Scene {
     if (Phaser.Input.Keyboard.JustDown(this.spaceKey) && !this.isChoosingUpgrade && !this.isDead) {
       if (now - this.lastAttackTime >= this.attackCooldown) {
         this.lastAttackTime = now;
-        this.performTongueAttack();
+        if (this.sprayUses > 0) {
+          this.performSprayAttack();
+        } else {
+          this.performTongueAttack();
+        }
       }
     }
 
@@ -729,6 +820,92 @@ class GameScene extends Phaser.Scene {
     });
   }
 
+  performSprayAttack() {
+    // SFX
+    if (this.sfxOn) this.sfxSpray();
+
+    // Parameters
+    const start = this.player.getCenter();
+    const angle = Math.atan2(this.lastDirection.y, this.lastDirection.x);
+    const range = this.sprayRange;
+    const half = this.sprayHalfAngle;
+
+    // Draw spray cone
+    this.sprayGfx.clear();
+    this.sprayGfx.fillStyle(0xb3ffe3, 0.35);
+    const a1 = angle - half;
+    const a2 = angle + half;
+    const tip1 = new Phaser.Math.Vector2(start.x + Math.cos(a1) * range, start.y + Math.sin(a1) * range);
+    const tip2 = new Phaser.Math.Vector2(start.x + Math.cos(a2) * range, start.y + Math.sin(a2) * range);
+    this.sprayGfx.fillTriangle(start.x, start.y, tip1.x, tip1.y, tip2.x, tip2.y);
+
+    // Emit mist particles along center line
+    if (this.sprayEmitter) {
+      const steps = 8;
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        const px = start.x + Math.cos(angle) * range * t + Phaser.Math.Between(-6, 6);
+        const py = start.y + Math.sin(angle) * range * t + Phaser.Math.Between(-6, 6);
+        this.sprayEmitter.explode(Phaser.Math.Between(2, 4), px, py);
+      }
+    }
+
+    // Kill enemies within cone
+    const enemies = this.enemies.getChildren();
+    let killsThisAttack = 0;
+    for (let i = enemies.length - 1; i >= 0; i--) {
+      const e = enemies[i];
+      if (!e.active) continue;
+      const ec = e.getCenter();
+      const dx = ec.x - start.x;
+      const dy = ec.y - start.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist > range) continue;
+      const angTo = Math.atan2(dy, dx);
+      const delta = Phaser.Math.Angle.Wrap(angTo - angle);
+      if (Math.abs(delta) <= half) {
+        // Instant kill
+        this.hitEmitter.explode(Phaser.Math.Between(8, 12), e.x, e.y);
+        const killed = this.damageEnemy(e, 9999);
+        if (killed) killsThisAttack++;
+      }
+    }
+
+    // Clear spray graphics shortly after
+    this.time.delayedCall(120, () => {
+      this.sprayGfx.clear();
+    });
+
+    // Also clear any enemy projectiles caught in the cone
+    if (this.projectiles) {
+      const ps = this.projectiles.getChildren();
+      for (let i = ps.length - 1; i >= 0; i--) {
+        const p = ps[i];
+        if (!p.active) continue;
+        const pc = p.getCenter();
+        const dx = pc.x - start.x;
+        const dy = pc.y - start.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > range) continue;
+        const angTo = Math.atan2(dy, dx);
+        const delta = Phaser.Math.Angle.Wrap(angTo - angle);
+        if (Math.abs(delta) <= half) {
+          this.hitEmitter.explode(3, p.x, p.y);
+          p.destroy();
+        }
+      }
+    }
+
+    // Consume a use and update UI/overlay
+    this.sprayUses = Math.max(0, this.sprayUses - 1);
+    this.updateSprayUI();
+
+    // Show upgrade every 10 kills (aligned with tongue behavior)
+    if (killsThisAttack > 0 && this.enemiesDefeated % 10 === 0 && !this.isChoosingUpgrade) {
+      this.showUpgradeSelection();
+    }
+  }
+
   damageEnemy(enemy, amount = 1) {
     if (!enemy || !enemy.active) return false;
     const curHp = enemy.getData('hp') != null ? enemy.getData('hp') : 1;
@@ -758,6 +935,7 @@ class GameScene extends Phaser.Scene {
     enemy.destroy();
     this.trySpawnHeart(hx, hy);
     this.trySpawnArmor(hx, hy);
+    this.trySpawnSprayCan(hx, hy);
 
     this.enemiesDefeated++;
     if (this.killsText) this.killsText.setText('Kills: ' + this.enemiesDefeated);
@@ -987,7 +1165,35 @@ class GameScene extends Phaser.Scene {
       ease: 'Sine.easeInOut'
     });
   }
-  
+
+  // Loot: spray can drop
+  trySpawnSprayCan(x, y) {
+    if (!this.sprayCans) return;
+    if (Math.random() >= this.sprayDropChance) return;
+    const can = this.sprayCans.create(x, y, 'spray_can');
+    can.setDepth(4);
+    if (can.body && can.body.setCircle) {
+      const r = Math.floor(Math.min(can.width, can.height) * 0.38);
+      const ox = (can.width / 2) - r;
+      const oy = (can.height / 2) - r;
+      can.body.setCircle(r, ox, oy);
+      can.body.setAllowGravity(false);
+      can.body.immovable = true;
+      can.body.setBounce(0, 0);
+      can.setVelocity(0, 0);
+    }
+    // Bobbing
+    this.tweens.add({
+      targets: can,
+      y: can.y - 6,
+      scale: { from: 1.0, to: 1.06 },
+      duration: 800,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut'
+    });
+  }
+
   onPlayerHeartOverlap(player, heart) {
     if (!heart || !heart.active) return;
     // Heal
@@ -1036,6 +1242,27 @@ class GameScene extends Phaser.Scene {
 
     if (this.sfxOn) this.sfxPickup();
     armor.destroy();
+  }
+
+  onPlayerSprayOverlap(player, can) {
+    if (!can || !can.active) return;
+    this.sprayUses = this.maxSprayUses;
+    this.updateSprayUI();
+
+    // Visual pop
+    const pop = this.add.image(can.x, can.y, 'spray_can').setDepth(11);
+    this.tweens.add({
+      targets: pop,
+      y: can.y - 12,
+      scale: 1.2,
+      alpha: 0,
+      duration: 220,
+      ease: 'Quad.easeOut',
+      onComplete: () => pop.destroy()
+    });
+
+    if (this.sfxOn) this.sfxPickup();
+    can.destroy();
   }
   
   // World-bounds collision logging for enemies
@@ -1273,6 +1500,13 @@ class GameScene extends Phaser.Scene {
     this.playTone({ type: 'sawtooth', startFreq: base, endFreq: base + 500, duration: 0.12, attack: 0.005, volume: 0.12 });
   }
 
+  sfxSpray() {
+    // Quick hiss made of layered tones
+    const base = 800 + Phaser.Math.Between(-40, 40);
+    this.playTone({ type: 'triangle', startFreq: base, endFreq: 600, duration: 0.08, attack: 0.001, volume: 0.10 });
+    this.playTone({ type: 'square', startFreq: base * 0.9, endFreq: 500, duration: 0.06, attack: 0.001, volume: 0.06, delay: 0.01 });
+  }
+ 
   sfxHit() {
     const base = 900 + Phaser.Math.Between(-60, 60);
     this.playTone({ type: 'square', startFreq: base, endFreq: 140, duration: 0.12, attack: 0.001, volume: 0.18 });
@@ -1324,7 +1558,17 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-
+  updateSprayUI() {
+    if (!this.sprayText) return;
+    if (this.sprayUses > 0) {
+      this.sprayText.setText('Spray: ' + this.sprayUses + '/' + this.maxSprayUses);
+      this.sprayText.setVisible(true);
+    } else {
+      this.sprayText.setText('');
+      this.sprayText.setVisible(false);
+    }
+  }
+  
   // Enemy contact damage
   onPlayerEnemyOverlap(player, enemy) {
     if (!enemy || !enemy.active || this.isDead) return;
