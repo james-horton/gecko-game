@@ -100,6 +100,36 @@ class GameScene extends Phaser.Scene {
       g.destroy();
     }
 
+    // Small flower textures for background decoration
+    {
+      const makeFlower = (key, petalColor, centerColor) => {
+        const f = this.make.graphics({ x: 0, y: 0, add: false });
+        const cx = 8, cy = 8;
+        // Petals
+        f.fillStyle(petalColor, 1);
+        const petals = 6;
+        for (let i = 0; i < petals; i++) {
+          const ang = (Math.PI * 2 / petals) * i;
+          const px = cx + Math.cos(ang) * 5;
+          const py = cy + Math.sin(ang) * 5;
+          f.fillCircle(px, py, 4);
+        }
+        // Center
+        f.fillStyle(centerColor, 1);
+        f.fillCircle(cx, cy, 3);
+        // Tiny highlight
+        f.fillStyle(0xffffff, 0.3);
+        f.fillCircle(cx + 1, cy - 1, 1);
+        f.generateTexture(key, 16, 16);
+        f.destroy();
+      };
+
+      makeFlower('flower_white',    0xffffff, 0xffd54f);
+      makeFlower('flower_pink',     0xff77a9, 0xfff176);
+      makeFlower('flower_blue',     0x77c1ff, 0xffecb3);
+      makeFlower('flower_lavender', 0xb388ff, 0xfff59d);
+    }
+
     // Player drop shadow
     {
       const sh = this.make.graphics({ x: 0, y: 0, add: false });
@@ -535,6 +565,23 @@ class GameScene extends Phaser.Scene {
 
     // Background
     this.bg = this.add.tileSprite(0, 0, this.worldWidth, this.worldHeight, 'ground_tile').setOrigin(0).setDepth(0);
+
+    // Flowers decoration scattered over grass
+    {
+      const flowerKeys = ['flower_white', 'flower_pink', 'flower_blue', 'flower_lavender'];
+      const area = this.worldWidth * this.worldHeight;
+      const count = Math.round(area / 50000); // roughly 10 for 800x600
+      for (let i = 0; i < count; i++) {
+        const key = flowerKeys[Phaser.Math.Between(0, flowerKeys.length - 1)];
+        const x = Phaser.Math.Between(10, this.worldWidth - 10);
+        const y = Phaser.Math.Between(10, this.worldHeight - 10);
+        const img = this.add.image(x, y, key);
+        img.setDepth(0.8); // below shadow (1), above ground (0)
+        img.setRotation(Phaser.Math.FloatBetween(0, Math.PI * 2));
+        img.setScale(Phaser.Math.FloatBetween(0.7, 1.15));
+        img.setAlpha(Phaser.Math.FloatBetween(0.9, 1));
+      }
+    }
 
     // Player
     this.player = this.physics.add.sprite(this.worldWidth / 2, this.worldHeight / 2, 'gecko');
