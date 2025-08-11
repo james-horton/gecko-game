@@ -19,6 +19,10 @@ class GameScene extends Phaser.Scene {
     this.hearts = null;
     this.heartDropChance = 0.25; // 25% chance to drop a heart on enemy death
     this.heartHealAmount = 1;
+    this.armors = null;
+    this.armorDropChance = 0.15; // 15% chance to drop armor on enemy death
+    this.hasArmor = false;
+    this.armorOverlay = null;
     // Upgrades / combat
     this.isChoosingUpgrade = false;
     this.upgradeChoices = [];
@@ -285,6 +289,49 @@ class GameScene extends Phaser.Scene {
       hg.generateTexture('heart_pickup', 32, 32);
       hg.destroy();
     }
+
+    // Armor pickup (chainmail icon)
+    {
+      const ag = this.make.graphics({ x: 0, y: 0, add: false });
+      // Background plate
+      ag.fillStyle(0x2b2f33, 1);
+      ag.fillRoundedRect(0, 0, 32, 32, 4);
+      // Chain rings pattern
+      ag.lineStyle(2, 0xc0c9d6, 1);
+      for (let ry = 6; ry <= 26; ry += 6) {
+        for (let rx = 6; rx <= 26; rx += 6) {
+          ag.strokeCircle(rx, ry, 3);
+        }
+      }
+      // Neckline
+      ag.fillStyle(0x000000, 0.15);
+      ag.fillCircle(16, 6, 5);
+      // Gloss highlight
+      ag.fillStyle(0xffffff, 0.08);
+      ag.fillRoundedRect(2, 2, 10, 6, 3);
+      ag.generateTexture('armor_pickup', 32, 32);
+      ag.destroy();
+    }
+
+    // Armor overlay texture rendered on the gecko when equipped
+    {
+      const og = this.make.graphics({ x: 0, y: 0, add: false });
+      // Transparent base
+      og.fillStyle(0x000000, 0);
+      og.fillRect(0, 0, 96, 64);
+      // Chain pattern sized to gecko sprite (96x64)
+      og.lineStyle(2, 0xbac6d6, 0.8);
+      for (let yy = 8; yy <= 56; yy += 12) {
+        for (let xx = 12; xx <= 84; xx += 12) {
+          og.strokeCircle(xx, yy, 5);
+        }
+      }
+      // Vest shading
+      og.fillStyle(0x0a0a0a, 0.10);
+      og.fillRoundedRect(14, 14, 68, 36, 10);
+      og.generateTexture('armor_overlay', 96, 64);
+      og.destroy();
+    }
     
     // Upgrade panel background
     {
@@ -313,6 +360,7 @@ class GameScene extends Phaser.Scene {
     this.maxHealth = 5;
     this.health = this.maxHealth;
     this.isDead = false;
+    this.hasArmor = false;
     this.enemiesDefeated = 0;
     this.isChoosingUpgrade = false;
     this.upgradeChoices = [];
@@ -371,6 +419,10 @@ class GameScene extends Phaser.Scene {
     this.sunglasses = this.add.sprite(this.player.x, this.player.y - 6, 'sunglasses');
     this.sunglasses.setDepth(10);
 
+    // Armor overlay (non-physics); shown when armor is equipped
+    this.armorOverlay = this.add.image(this.player.x, this.player.y, 'armor_overlay').setVisible(false);
+    this.armorOverlay.setDepth(8).setAlpha(0.7);
+    
     // Input
     this.cursors = this.input.keyboard.createCursorKeys();
     this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
@@ -406,6 +458,10 @@ class GameScene extends Phaser.Scene {
     // Hearts
     this.hearts = this.physics.add.group({ allowGravity: false, immovable: true });
     this.physics.add.overlap(this.player, this.hearts, this.onPlayerHeartOverlap, null, this);
+    
+    // Armor pickups
+    this.armors = this.physics.add.group({ allowGravity: false, immovable: true });
+    this.physics.add.overlap(this.player, this.armors, this.onPlayerArmorOverlap, null, this);
     
     // Text UI
     this.killsText = this.add.text(8, 8, 'Kills: 0', {
@@ -473,17 +529,26 @@ class GameScene extends Phaser.Scene {
     // Rotate player to face direction
     this.player.setRotation(angle);
   
-    // Keep shadow and sunglasses aligned
+    // Keep shadow, sunglasses, and armor aligned
     const headOffset = new Phaser.Math.Vector2(18, -6).rotate(angle);
     this.sunglasses.setPosition(this.player.x + headOffset.x, this.player.y + headOffset.y);
     this.sunglasses.setRotation(angle);
     this.shadow.setPosition(this.player.x, this.player.y + 18);
-
+    // Armor overlay follows player
+    if (this.armorOverlay) {
+      this.armorOverlay.setPosition(this.player.x, this.player.y);
+      this.armorOverlay.setRotation(angle);
+      this.armorOverlay.setVisible(this.hasArmor);
+    }
+    
     // Invulnerability blink
     const inv = now < this.invulnUntil;
     this.player.setAlpha(inv ? 0.6 : 1);
     this.sunglasses.setAlpha(inv ? 0.7 : (this.isDead ? 0.3 : 1));
-  
+    if (this.armorOverlay) {
+      this.armorOverlay.setAlpha(inv ? 0.55 : (this.isDead ? 0.25 : 0.7));
+    }
+    
     // Attack input (space)
     if (Phaser.Input.Keyboard.JustDown(this.spaceKey) && !this.isChoosingUpgrade && !this.isDead) {
       if (now - this.lastAttackTime >= this.attackCooldown) {
@@ -560,6 +625,7 @@ class GameScene extends Phaser.Scene {
         const hy = e.y;
         e.destroy();
         this.trySpawnHeart(hx, hy);
+        this.trySpawnArmor(hx, hy);
         this.enemiesDefeated++;
         killsThisAttack++;
         this.killsText.setText('Kills: ' + this.enemiesDefeated);
@@ -733,6 +799,34 @@ class GameScene extends Phaser.Scene {
       ease: 'Sine.easeInOut'
     });
   }
+
+  // Loot: armor drop (chainmail icon)
+  trySpawnArmor(x, y) {
+    if (!this.armors) return;
+    if (Math.random() >= this.armorDropChance) return;
+    const armor = this.armors.create(x, y, 'armor_pickup');
+    armor.setDepth(4);
+    if (armor.body && armor.body.setCircle) {
+      const r = Math.floor(Math.min(armor.width, armor.height) * 0.4);
+      const ox = (armor.width / 2) - r;
+      const oy = (armor.height / 2) - r;
+      armor.body.setCircle(r, ox, oy);
+      armor.body.setAllowGravity(false);
+      armor.body.immovable = true;
+      armor.body.setBounce(0, 0);
+      armor.setVelocity(0, 0);
+    }
+    // Gentle bobbing
+    this.tweens.add({
+      targets: armor,
+      y: armor.y - 6,
+      scale: { from: 1.0, to: 1.08 },
+      duration: 800,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut'
+    });
+  }
   
   onPlayerHeartOverlap(player, heart) {
     if (!heart || !heart.active) return;
@@ -754,6 +848,34 @@ class GameScene extends Phaser.Scene {
       onComplete: () => pop.destroy()
     });
     heart.destroy();
+  }
+
+  onPlayerArmorOverlap(player, armor) {
+    if (!armor || !armor.active) return;
+    this.hasArmor = true;
+
+    // Visual feedback
+    if (this.armorOverlay) {
+      this.armorOverlay.setVisible(true);
+      this.armorOverlay.setAlpha(0.7);
+      // Pickup pop FX
+      const pop = this.add.image(armor.x, armor.y, 'armor_pickup').setDepth(11);
+      this.tweens.add({
+        targets: pop,
+        y: armor.y - 12,
+        scale: 1.2,
+        alpha: 0,
+        duration: 220,
+        ease: 'Quad.easeOut',
+        onComplete: () => pop.destroy()
+      });
+    }
+
+    // Subtle tint to indicate armored state
+    if (this.player) this.player.setTint(0xb9c6d0);
+
+    if (this.sfxOn) this.sfxPickup();
+    armor.destroy();
   }
   
   // World-bounds collision logging for enemies
@@ -1057,7 +1179,9 @@ class GameScene extends Phaser.Scene {
     const now = this.time.now;
     if (now < this.invulnUntil) return;
 
-    this.health = Math.max(0, this.health - amount);
+    // Armor reduces incoming damage by half
+    const finalDmg = this.hasArmor ? Math.ceil(amount * 0.5) : amount;
+    this.health = Math.max(0, this.health - finalDmg);
     this.invulnUntil = now + this.invulnDuration;
 
     // SFX and camera shake
