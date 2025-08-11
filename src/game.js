@@ -3,7 +3,6 @@ class GameScene extends Phaser.Scene {
     super({ key: 'GameScene' });
     // Core state
     this.player = null;
-    this.sunglasses = null;
     this.cursors = null;
     this.spaceKey = null;
     this.lastDirection = new Phaser.Math.Vector2(1, 0);
@@ -211,24 +210,6 @@ class GameScene extends Phaser.Scene {
 
       g1.generateTexture('gecko', 96, 64);
       g1.destroy();
-    }
-
-    // Sunglasses with reflection
-    {
-      const sg = this.make.graphics({ x: 0, y: 0, add: false });
-      sg.fillStyle(0x0b0b0b, 1);
-      sg.fillRoundedRect(0, 0, 22, 12, 4);
-      sg.fillRoundedRect(24, 0, 22, 12, 4);
-      sg.fillStyle(0x161616, 1);
-      sg.fillRect(22, 4, 2, 4);
-      sg.lineStyle(2, 0x1a1a1a, 1);
-      sg.strokeRoundedRect(0, 0, 22, 12, 4);
-      sg.strokeRoundedRect(24, 0, 22, 12, 4);
-      sg.fillStyle(0xffffff, 0.15);
-      sg.fillTriangle(2, 2, 14, 2, 2, 10);
-      sg.fillTriangle(26, 2, 38, 2, 26, 10);
-      sg.generateTexture('sunglasses', 46, 12);
-      sg.destroy();
     }
 
     // Enemies: beetle
@@ -571,10 +552,6 @@ class GameScene extends Phaser.Scene {
     // Shadow under player (not physics)
     this.shadow = this.add.image(this.player.x, this.player.y + 18, 'shadow_oval').setAlpha(0.35).setDepth(1);
 
-    // Sunglasses follow sprite (not a physics child)
-    this.sunglasses = this.add.sprite(this.player.x, this.player.y - 6, 'sunglasses');
-    this.sunglasses.setDepth(10);
-
     // Armor overlay (non-physics); shown when armor is equipped
     this.armorOverlay = this.add.image(this.player.x, this.player.y, 'armor_overlay').setVisible(false);
     this.armorOverlay.setDepth(8).setAlpha(0.7);
@@ -709,10 +686,8 @@ class GameScene extends Phaser.Scene {
     // Rotate player to face direction
     this.player.setRotation(angle);
   
-    // Keep shadow, sunglasses, and armor aligned
+    // Keep shadow, and armor aligned
     const headOffset = new Phaser.Math.Vector2(18, -6).rotate(angle);
-    this.sunglasses.setPosition(this.player.x + headOffset.x, this.player.y + headOffset.y);
-    this.sunglasses.setRotation(angle);
     this.shadow.setPosition(this.player.x, this.player.y + 18);
     // Armor overlay follows player
     if (this.armorOverlay) {
@@ -731,7 +706,6 @@ class GameScene extends Phaser.Scene {
     // Invulnerability blink
     const inv = now < this.invulnUntil;
     this.player.setAlpha(inv ? 0.6 : 1);
-    this.sunglasses.setAlpha(inv ? 0.7 : (this.isDead ? 0.3 : 1));
     if (this.armorOverlay) {
       this.armorOverlay.setAlpha(inv ? 0.55 : (this.isDead ? 0.25 : 0.7));
     }
@@ -1629,7 +1603,6 @@ class GameScene extends Phaser.Scene {
 
     // Visual state
     this.player.setTint(0x444444);
-    this.sunglasses.setAlpha(0.3);
 
     // Overlay UI
     const overlay = this.add
