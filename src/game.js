@@ -9,6 +9,12 @@ class GameScene extends Phaser.Scene {
     this.lastDirection = new Phaser.Math.Vector2(1, 0);
     this.enemies = null;
     this.enemiesDefeated = 0;
+    // Ranged enemy/projectiles
+    this.projectiles = null;
+    this.shooterMoveSpeed = 100;
+    this.shooterProjectileSpeed = 300;
+    this.shooterMinCooldown = 900; // ms
+    this.shooterMaxCooldown = 1600; // ms
     // Loot / pickups
     this.hearts = null;
     this.heartDropChance = 0.25; // 25% chance to drop a heart on enemy death
@@ -205,6 +211,49 @@ class GameScene extends Phaser.Scene {
       fg.destroy();
     }
 
+    // Enemies: wasp (ranged)
+    {
+      const wg = this.make.graphics({ x: 0, y: 0, add: false });
+      // Wings
+      wg.fillStyle(0xccddff, 0.45);
+      wg.fillEllipse(28, 10, 18, 12);
+      wg.fillEllipse(28, 22, 18, 12);
+      // Body with yellow stripes
+      wg.fillStyle(0x1f1f1f, 1);
+      wg.fillEllipse(16, 16, 28, 18);
+      wg.fillStyle(0xffd600, 1);
+      wg.fillRect(6, 10, 18, 4);
+      wg.fillRect(6, 16, 18, 4);
+      wg.fillRect(6, 22, 18, 4);
+      // Head
+      wg.fillStyle(0x1f1f1f, 1);
+      wg.fillCircle(6, 16, 6);
+      // Eye
+      wg.fillStyle(0xffffff, 1);
+      wg.fillCircle(4, 14, 2);
+      wg.fillStyle(0x000000, 1);
+      wg.fillCircle(4, 14, 1);
+      // Stinger tip
+      wg.fillStyle(0xffd600, 1);
+      wg.fillTriangle(28, 16, 36, 14, 36, 18);
+      // Outline
+      wg.lineStyle(1, 0x111111, 0.6);
+      wg.strokeEllipse(16, 16, 26, 16);
+      wg.generateTexture('enemy_wasp', 40, 32);
+      wg.destroy();
+    }
+
+    // Projectile: stinger
+    {
+      const pg = this.make.graphics({ x: 0, y: 0, add: false });
+      pg.fillStyle(0xffef66, 1);
+      pg.fillTriangle(2, 4, 14, 8, 2, 12);
+      pg.lineStyle(1, 0x6b5e00, 1);
+      pg.strokeTriangle(2, 4, 14, 8, 2, 12);
+      pg.generateTexture('stinger_projectile', 16, 16);
+      pg.destroy();
+    }
+
     // Tongue tip + splat particle
     {
       const tg = this.make.graphics({ x: 0, y: 0, add: false });
@@ -350,6 +399,10 @@ class GameScene extends Phaser.Scene {
       this.spawnEnemy();
     }
     
+    // Projectiles (enemy shots)
+    this.projectiles = this.physics.add.group({ allowGravity: false });
+    this.physics.add.overlap(this.player, this.projectiles, this.onPlayerProjectileOverlap, null, this);
+    
     // Hearts
     this.hearts = this.physics.add.group({ allowGravity: false, immovable: true });
     this.physics.add.overlap(this.player, this.hearts, this.onPlayerHeartOverlap, null, this);
@@ -438,6 +491,18 @@ class GameScene extends Phaser.Scene {
         this.performTongueAttack();
       }
     }
+
+    // Enemy AI (ranged behaviors)
+    if (this.enemies) {
+      const ecs = this.enemies.getChildren();
+      for (let i = 0; i < ecs.length; i++) {
+        const e = ecs[i];
+        if (!e || !e.active) continue;
+        if (e.getData('type') === 'enemy_wasp') {
+          this.updateWaspAI(e, now);
+        }
+      }
+    }
   }
 
   performTongueAttack() {
@@ -515,15 +580,88 @@ class GameScene extends Phaser.Scene {
     });
   }
 
+  updateWaspAI(enemy, now) {
+    if (!this.player || !enemy || !enemy.body) return;
+
+    const p = this.player.getCenter();
+    const epos = enemy.getCenter();
+    const dir = new Phaser.Math.Vector2(p.x - epos.x, p.y - epos.y);
+    const dist = dir.length();
+    if (dist > 0.0001) dir.normalize();
+
+    // Movement: hover near a comfortable range
+    const desired = 200;
+    const speed = this.shooterMoveSpeed;
+    if (dist < desired * 0.75) {
+      enemy.setVelocity(-dir.x * speed, -dir.y * speed);
+    } else if (dist > desired * 1.25) {
+      enemy.setVelocity(dir.x * speed, dir.y * speed);
+    } else {
+      enemy.setVelocity(0, 0);
+    }
+
+    // Face the player
+    enemy.setRotation(Math.atan2(dir.y, dir.x));
+
+    // Firing
+    const nextAt = enemy.getData('nextShotAt') || 0;
+    if (now >= nextAt && dist > 80) {
+      const sx = epos.x + dir.x * 18;
+      const sy = epos.y + dir.y * 12;
+      this.spawnStinger(sx, sy, dir);
+      const cd = Phaser.Math.Between(this.shooterMinCooldown, this.shooterMaxCooldown);
+      enemy.setData('nextShotAt', now + cd);
+      if (this.sfxOn) {
+        this.playTone({ type: 'square', startFreq: 800, endFreq: 1200, duration: 0.05, attack: 0.001, volume: 0.08 });
+      }
+    }
+  }
+
+  spawnStinger(x, y, dir) {
+    if (!this.projectiles) return;
+    const proj = this.projectiles.create(x, y, 'stinger_projectile');
+    proj.setDepth(6);
+    const ang = Math.atan2(dir.y, dir.x);
+    proj.setRotation(ang);
+    if (proj.setAngle) proj.setAngle(Phaser.Math.RadToDeg(ang));
+    if (proj.body) {
+      proj.body.setAllowGravity(false);
+      proj.setCollideWorldBounds(true);
+      proj.body.onWorldBounds = true;
+    }
+    const speed = this.shooterProjectileSpeed;
+    proj.setVelocity(dir.x * speed, dir.y * speed);
+    // Tighter circle for hitbox
+    if (proj.body && proj.body.setCircle) {
+      const r = Math.floor(Math.min(proj.width, proj.height) * 0.32);
+      const ox = proj.width / 2 - r;
+      const oy = proj.height / 2 - r;
+      proj.body.setCircle(r, ox, oy);
+    }
+    return proj;
+  }
+
+  onPlayerProjectileOverlap(player, proj) {
+    if (!proj || !proj.active || this.isDead) return;
+    this.takeDamage(1, proj);
+    this.hitEmitter.explode(6, proj.x, proj.y);
+    proj.destroy();
+  }
+
   spawnEnemy() {
     const margin = 40;
     const x = Phaser.Math.Between(margin, this.worldWidth - margin);
     const y = Phaser.Math.Between(margin, this.worldHeight - margin);
-    const type = Phaser.Math.Between(0, 1) === 0 ? 'enemy_beetle' : 'enemy_fly';
+    const roll = Phaser.Math.Between(0, 2);
+    const type = roll === 0 ? 'enemy_beetle' : (roll === 1 ? 'enemy_fly' : 'enemy_wasp');
     const enemy = this.enemies.create(x, y, type);
     enemy.setData('type', type);
     enemy.setCollideWorldBounds(true);
-    enemy.setBounce(1, 1);
+    if (type === 'enemy_wasp') {
+      enemy.setBounce(0, 0);
+    } else {
+      enemy.setBounce(1, 1);
+    }
     if (enemy.body) enemy.body.onWorldBounds = true;
     enemy.setDepth(4);
     // Tighter circular physics body for enemy
@@ -540,7 +678,7 @@ class GameScene extends Phaser.Scene {
       const sp = Phaser.Math.Between(40, 80);
       const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
       enemy.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp);
-    } else {
+    } else if (type === 'enemy_fly') {
       const sp = Phaser.Math.Between(70, 120);
       const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
       enemy.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp);
@@ -548,6 +686,19 @@ class GameScene extends Phaser.Scene {
         targets: enemy,
         scale: { from: 0.95, to: 1.08 },
         duration: 360,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut'
+      });
+    } else {
+      // enemy_wasp: ranged pursuer
+      enemy.setVelocity(0, 0);
+      enemy.setDrag(0, 0);
+      enemy.setData('nextShotAt', this.time.now + Phaser.Math.Between(this.shooterMinCooldown, this.shooterMaxCooldown));
+      this.tweens.add({
+        targets: enemy,
+        scale: { from: 0.98, to: 1.05 },
+        duration: 420,
         yoyo: true,
         repeat: -1,
         ease: 'Sine.easeInOut'
@@ -609,6 +760,12 @@ class GameScene extends Phaser.Scene {
   onWorldBoundsCollision(body, up, down, left, right) {
     if (!body || !body.gameObject) return;
     const go = body.gameObject;
+
+    // Destroy projectiles when they hit world bounds
+    if (this.projectiles && this.projectiles.contains(go)) {
+      go.destroy();
+      return;
+    }
 
     // Only track enemies
     if (!this.enemies || !this.enemies.contains(go)) return;
