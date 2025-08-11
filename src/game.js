@@ -96,44 +96,105 @@ class GameScene extends Phaser.Scene {
       sh.destroy();
     }
 
-    // Detailed Gecko sprite
+    // Improved Gecko sprite: curved tail, toe pads, shading, and specular highlights
     {
       const g1 = this.make.graphics({ x: 0, y: 0, add: false });
-      // Tail
-      g1.fillStyle(0x26a269, 1);
-      g1.fillPoints([{ x: 14, y: 32 }, { x: 2, y: 24 }, { x: 2, y: 40 }], true);
+      // Palette
+      const cBase = 0x33cc88;   // body base
+      const cBelly = 0xa7f0c5;  // belly/underside
+      const cDark = 0x1f8f66;   // dorsal/dark limbs
+      const cSpot = 0x187f59;   // spots
+      const cOutline = 0x0e3b2e;// outline
+
+      // Tail: tapered curved chain of circles
+      g1.fillStyle(cBase, 1);
+      for (let i = 0; i < 14; i++) {
+        const t = i / 13;
+        const x = 28 - t * 24 + Math.sin(t * 2.1) * 3;
+        const y = 36 - t * 4 + Math.sin(t * Math.PI) * 6;
+        const r = 12 - t * 9;
+        g1.fillCircle(x, y, r);
+      }
+      // Dorsal shade on tail
+      g1.fillStyle(cDark, 0.85);
+      for (let i = 0; i < 12; i++) {
+        const t = i / 11;
+        const x = 28 - t * 22 + Math.sin(t * 2.1) * 3;
+        const y = 36 - t * 4 + Math.sin(t * Math.PI) * 5 - 2;
+        const r = (10 - t * 7) * 0.6;
+        g1.fillCircle(x, y, r);
+      }
+
       // Body
-      g1.fillStyle(0x2ec27e, 1);
-      g1.fillEllipse(48, 34, 72, 36);
+      g1.fillStyle(cBase, 1);
+      g1.fillEllipse(50, 36, 74, 40);
+
       // Belly highlight
-      g1.fillStyle(0x9ae6b9, 1);
-      g1.fillEllipse(42, 38, 42, 20);
+      g1.fillStyle(cBelly, 1);
+      g1.fillEllipse(44, 40, 44, 22);
+
       // Head
-      g1.fillStyle(0x2ec27e, 1);
-      g1.fillEllipse(76, 28, 28, 22);
-      // Spots
-      g1.fillStyle(0x238c6a, 1);
-      g1.fillCircle(52, 24, 4);
-      g1.fillCircle(40, 30, 3);
-      g1.fillCircle(60, 38, 3);
-      g1.fillCircle(68, 22, 3);
+      g1.fillStyle(cBase, 1);
+      g1.fillEllipse(78, 30, 30, 24);
+
+      // Mouth line (subtle)
+      g1.lineStyle(2, cOutline, 0.6);
+      g1.beginPath();
+      g1.moveTo(82, 36);
+      g1.lineTo(92, 34);
+      g1.strokePath();
+
       // Legs
-      g1.fillStyle(0x207a5c, 1);
-      g1.fillEllipse(36, 52, 16, 6);
-      g1.fillEllipse(24, 48, 16, 6);
-      g1.fillEllipse(56, 52, 16, 6);
-      g1.fillEllipse(68, 48, 16, 6);
-      // Eye
+      g1.fillStyle(cDark, 1);
+      g1.fillEllipse(34, 56, 18, 8);
+      g1.fillEllipse(22, 50, 18, 8);
+      g1.fillEllipse(58, 56, 18, 8);
+      g1.fillEllipse(70, 50, 18, 8);
+      // Toe pads
+      const toes = [
+        {x: 40, y: 58}, {x: 36, y: 60}, {x: 32, y: 59},
+        {x: 18, y: 50}, {x: 22, y: 52}, {x: 26, y: 51},
+        {x: 64, y: 58}, {x: 60, y: 60}, {x: 56, y: 59},
+        {x: 72, y: 50}, {x: 76, y: 51}, {x: 80, y: 49}
+      ];
+      g1.fillStyle(0x2aa876, 1);
+      for (const t of toes) g1.fillCircle(t.x, t.y, 2.2);
+
+      // Eye with iris and highlight
       g1.fillStyle(0xffffff, 1);
-      g1.fillCircle(86, 24, 5);
-      g1.fillStyle(0x000000, 1);
-      g1.fillCircle(88, 24, 2);
+      g1.fillCircle(88, 26, 6);
+      g1.fillStyle(0x263238, 1);
+      g1.fillCircle(89, 26, 3);
       g1.fillStyle(0xffffff, 1);
-      g1.fillCircle(89, 23, 1);
-      // Outline
-      g1.lineStyle(2, 0x0e3b2e, 0.6);
-      g1.strokeEllipse(48, 34, 72, 36);
-      g1.strokeEllipse(76, 28, 28, 22);
+      g1.fillCircle(91, 25, 1.5);
+      // Eyelid accent
+      g1.lineStyle(2, cOutline, 0.7);
+      g1.beginPath();
+      g1.moveTo(82, 22);
+      g1.lineTo(94, 22);
+      g1.strokePath();
+
+      // Spots
+      g1.fillStyle(cSpot, 1);
+      const spots = [
+        {x: 54, y: 24, r: 4},
+        {x: 44, y: 30, r: 3},
+        {x: 64, y: 38, r: 3},
+        {x: 68, y: 24, r: 3},
+        {x: 52, y: 44, r: 2},
+        {x: 36, y: 36, r: 2}
+      ];
+      for (const s of spots) g1.fillCircle(s.x, s.y, s.r);
+
+      // Body sheen
+      g1.fillStyle(0xffffff, 0.10);
+      g1.fillEllipse(60, 24, 26, 12);
+
+      // Outlines
+      g1.lineStyle(2, cOutline, 0.6);
+      g1.strokeEllipse(50, 36, 74, 40);
+      g1.strokeEllipse(78, 30, 30, 24);
+
       g1.generateTexture('gecko', 96, 64);
       g1.destroy();
     }
