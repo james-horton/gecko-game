@@ -12,9 +12,12 @@ class GameScene extends Phaser.Scene {
     // Ranged enemy/projectiles
     this.projectiles = null;
     this.shooterMoveSpeed = 100;
-    this.shooterProjectileSpeed = 300;
+    this.shooterProjectileSpeed = 260;
     this.shooterMinCooldown = 900; // ms
     this.shooterMaxCooldown = 1600; // ms
+    // Wasp spawning control
+    this.waspsUnlocked = false;     // locked until first kill
+    this.maxActiveWasps = 3;        // cap simultaneous wasps
     // Loot / pickups
     this.hearts = null;
     this.heartDropChance = 0.25; // 25% chance to drop a heart on enemy death
@@ -458,6 +461,7 @@ class GameScene extends Phaser.Scene {
     this.isDead = false;
     this.hasArmor = false;
     this.enemiesDefeated = 0;
+    this.waspsUnlocked = false;
     this.isChoosingUpgrade = false;
     this.upgradeChoices = [];
     this.speed = 220;
@@ -757,6 +761,10 @@ class GameScene extends Phaser.Scene {
 
     this.enemiesDefeated++;
     if (this.killsText) this.killsText.setText('Kills: ' + this.enemiesDefeated);
+    // Unlock ranged enemies (wasps) after the very first kill
+    if (this.enemiesDefeated === 1) {
+      this.waspsUnlocked = true;
+    }
 
     // Respawn after a short delay to keep pressure
     this.time.delayedCall(600, () => this.spawnEnemy());
@@ -836,12 +844,20 @@ class GameScene extends Phaser.Scene {
     const margin = 40;
     const x = Phaser.Math.Between(margin, this.worldWidth - margin);
     const y = Phaser.Math.Between(margin, this.worldHeight - margin);
-    const roll = Phaser.Math.Between(0, 3);
-    const type =
-      roll === 0 ? 'enemy_beetle' :
-      roll === 1 ? 'enemy_fly' :
-      roll === 2 ? 'enemy_wasp' :
-      'enemy_caterpillar';
+    // Determine allowed enemy types based on wasp unlock and cap
+    let waspCount = 0;
+    if (this.enemies && this.enemies.getChildren) {
+      const cs = this.enemies.getChildren();
+      for (let i = 0; i < cs.length; i++) {
+        const c = cs[i];
+        if (c && c.active && c.getData && c.getData('type') === 'enemy_wasp') waspCount++;
+      }
+    }
+    const canSpawnWasp = this.waspsUnlocked && waspCount < this.maxActiveWasps;
+    const pool = canSpawnWasp
+      ? ['enemy_beetle', 'enemy_fly', 'enemy_wasp', 'enemy_caterpillar']
+      : ['enemy_beetle', 'enemy_fly', 'enemy_caterpillar'];
+    const type = pool[Phaser.Math.Between(0, pool.length - 1)];
     const enemy = this.enemies.create(x, y, type);
     enemy.setData('type', type);
     enemy.setCollideWorldBounds(true);
