@@ -247,6 +247,41 @@ class GameScene extends Phaser.Scene {
       wg.destroy();
     }
 
+    // Enemies: caterpillar (tank)
+    {
+      const cg = this.make.graphics({ x: 0, y: 0, add: false });
+      // Body segments
+      cg.fillStyle(0x2ec27e, 1);
+      const segs = 6;
+      for (let i = 0; i < segs; i++) {
+        cg.fillEllipse(12 + i * 9, 18, 18, 14);
+      }
+      // Head
+      cg.fillStyle(0x26a269, 1);
+      cg.fillEllipse(10, 18, 20, 16);
+      // Spots
+      cg.fillStyle(0x238c6a, 1);
+      cg.fillCircle(22, 14, 2);
+      cg.fillCircle(30, 20, 2);
+      cg.fillCircle(38, 14, 2);
+      cg.fillCircle(46, 20, 2);
+      // Legs
+      cg.lineStyle(2, 0x1a4d3b, 1);
+      for (let lx = 14; lx <= 56; lx += 8) {
+        cg.beginPath();
+        cg.moveTo(lx, 28); cg.lineTo(lx - 4, 34);
+        cg.moveTo(lx, 28); cg.lineTo(lx + 4, 34);
+        cg.strokePath();
+      }
+      // Eye
+      cg.fillStyle(0xffffff, 1);
+      cg.fillCircle(6, 14, 2);
+      cg.fillStyle(0x000000, 1);
+      cg.fillCircle(6, 14, 1);
+      cg.generateTexture('enemy_caterpillar', 64, 36);
+      cg.destroy();
+    }
+
     // Projectile: stinger
     {
       const pg = this.make.graphics({ x: 0, y: 0, add: false });
@@ -605,32 +640,15 @@ class GameScene extends Phaser.Scene {
       const ec = e.getCenter();
       const r = e.body ? Math.min(e.body.width, e.body.height) * 0.5 : Math.min(e.displayWidth, e.displayHeight) * this.enemyBodyRadiusFactor;
       if (Phaser.Geom.Intersects.LineToCircle(line, new Phaser.Geom.Circle(ec.x, ec.y, r))) {
-        // FX
+        // Hit FX each time
         this.hitEmitter.explode(Phaser.Math.Between(8, 12), e.x, e.y);
         this.cameras.main.shake(100, 0.004);
         if (this.sfxOn) this.sfxHit();
-        const pop = this.add.image(e.x, e.y, e.texture.key).setDepth((e.depth || 4) + 1);
-        pop.setScale(e.scaleX || 1, e.scaleY || 1);
-        this.tweens.add({
-          targets: pop,
-          y: e.y - 6,
-          scale: (e.scaleX || 1) * 1.2,
-          alpha: 0,
-          duration: 200,
-          ease: 'Quad.easeOut',
-          onComplete: () => pop.destroy()
-        });
 
-        const hx = e.x;
-        const hy = e.y;
-        e.destroy();
-        this.trySpawnHeart(hx, hy);
-        this.trySpawnArmor(hx, hy);
-        this.enemiesDefeated++;
-        killsThisAttack++;
-        this.killsText.setText('Kills: ' + this.enemiesDefeated);
-        // Respawn after a short delay to keep pressure
-        this.time.delayedCall(600, () => this.spawnEnemy());
+        const killed = this.damageEnemy(e, 1);
+        if (killed) {
+          killsThisAttack++;
+        }
       }
     }
 
@@ -644,6 +662,45 @@ class GameScene extends Phaser.Scene {
       this.tongue.clear();
       this.tongueTip.setVisible(false);
     });
+  }
+
+  damageEnemy(enemy, amount = 1) {
+    if (!enemy || !enemy.active) return false;
+    const curHp = enemy.getData('hp') != null ? enemy.getData('hp') : 1;
+    const newHp = Math.max(0, curHp - amount);
+    enemy.setData('hp', newHp);
+
+    if (newHp > 0) {
+      return false;
+    }
+
+    // Death FX + loot + respawn
+    const hx = enemy.x;
+    const hy = enemy.y;
+
+    const pop = this.add.image(hx, hy, enemy.texture.key).setDepth((enemy.depth || 4) + 1);
+    pop.setScale(enemy.scaleX || 1, enemy.scaleY || 1);
+    this.tweens.add({
+      targets: pop,
+      y: hy - 6,
+      scale: (enemy.scaleX || 1) * 1.2,
+      alpha: 0,
+      duration: 200,
+      ease: 'Quad.easeOut',
+      onComplete: () => pop.destroy()
+    });
+
+    enemy.destroy();
+    this.trySpawnHeart(hx, hy);
+    this.trySpawnArmor(hx, hy);
+
+    this.enemiesDefeated++;
+    if (this.killsText) this.killsText.setText('Kills: ' + this.enemiesDefeated);
+
+    // Respawn after a short delay to keep pressure
+    this.time.delayedCall(600, () => this.spawnEnemy());
+
+    return true;
   }
 
   updateWaspAI(enemy, now) {
@@ -718,8 +775,12 @@ class GameScene extends Phaser.Scene {
     const margin = 40;
     const x = Phaser.Math.Between(margin, this.worldWidth - margin);
     const y = Phaser.Math.Between(margin, this.worldHeight - margin);
-    const roll = Phaser.Math.Between(0, 2);
-    const type = roll === 0 ? 'enemy_beetle' : (roll === 1 ? 'enemy_fly' : 'enemy_wasp');
+    const roll = Phaser.Math.Between(0, 3);
+    const type =
+      roll === 0 ? 'enemy_beetle' :
+      roll === 1 ? 'enemy_fly' :
+      roll === 2 ? 'enemy_wasp' :
+      'enemy_caterpillar';
     const enemy = this.enemies.create(x, y, type);
     enemy.setData('type', type);
     enemy.setCollideWorldBounds(true);
@@ -740,7 +801,12 @@ class GameScene extends Phaser.Scene {
         enemy.body.setCircle(er, eox, eoy);
       }
     }
+    // Per-type stats and behavior
+    let hp = 1;
+    let contactDamage = 1;
+
     if (type === 'enemy_beetle') {
+      contactDamage = 2;
       const sp = Phaser.Math.Between(40, 80);
       const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
       enemy.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp);
@@ -752,6 +818,20 @@ class GameScene extends Phaser.Scene {
         targets: enemy,
         scale: { from: 0.95, to: 1.08 },
         duration: 360,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut'
+      });
+    } else if (type === 'enemy_caterpillar') {
+      hp = 3; // bigger, slower, tougher
+      contactDamage = 2;
+      const sp = Phaser.Math.Between(15, 35);
+      const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
+      enemy.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp);
+      this.tweens.add({
+        targets: enemy,
+        scaleY: { from: 0.98, to: 1.02 },
+        duration: 520,
         yoyo: true,
         repeat: -1,
         ease: 'Sine.easeInOut'
@@ -770,6 +850,9 @@ class GameScene extends Phaser.Scene {
         ease: 'Sine.easeInOut'
       });
     }
+
+    enemy.setData('hp', hp);
+    enemy.setData('contactDamage', contactDamage);
   }
   
   // Loot: health heart drop
@@ -1169,8 +1252,9 @@ class GameScene extends Phaser.Scene {
   onPlayerEnemyOverlap(player, enemy) {
     if (!enemy || !enemy.active || this.isDead) return;
 
-
-    const dmg = enemy.getData('type') === 'enemy_beetle' ? 2 : 1;
+    const dmg = enemy.getData('contactDamage') != null
+      ? enemy.getData('contactDamage')
+      : (enemy.getData('type') === 'enemy_beetle' ? 2 : 1);
     this.takeDamage(dmg, enemy);
   }
 
