@@ -558,7 +558,7 @@ class GameScene extends Phaser.Scene {
     }
 
     // Enemy AI (ranged behaviors)
-    if (this.enemies) {
+    if (this.enemies && !this.isDead && !this.isChoosingUpgrade) {
       const ecs = this.enemies.getChildren();
       for (let i = 0; i < ecs.length; i++) {
         const e = ecs[i];
@@ -647,7 +647,7 @@ class GameScene extends Phaser.Scene {
   }
 
   updateWaspAI(enemy, now) {
-    if (!this.player || !enemy || !enemy.body) return;
+    if (!this.player || !enemy || !enemy.body || this.isDead || this.isChoosingUpgrade) return;
 
     const p = this.player.getCenter();
     const epos = enemy.getCenter();
@@ -1216,6 +1216,11 @@ class GameScene extends Phaser.Scene {
 
     if (this.sfxOn) this.sfxDie();
     this.physics.pause();
+
+    // Clear any active enemy projectiles
+    if (this.projectiles) {
+      this.projectiles.clear(true, true);
+    }
 
     // Visual state
     this.player.setTint(0x444444);
