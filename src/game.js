@@ -267,6 +267,16 @@ class GameScene extends Phaser.Scene {
     }).setDepth(20);
     this.killsText.setStroke('#000000', 3);
     this.killsText.setShadow(0, 2, '#000000', 2, true, true);
+
+    // Audio
+    this.initAudio();
+    // One-time audio test on first click to verify unlock
+    if (this.input) {
+      this.input.once('pointerdown', () => {
+        console.info('[Audio] pointerdown -> test tone', { sfxOn: this.sfxOn, ctxState: this.audioCtx && this.audioCtx.state });
+        if (this.sfxOn) this.sfxUpgradeOpen();
+      });
+    }
   }
 
   update() {
@@ -308,6 +318,9 @@ class GameScene extends Phaser.Scene {
   }
 
   performTongueAttack() {
+    console.debug('[Audio] performTongueAttack', { sfxOn: this.sfxOn, ctxState: this.audioCtx && this.audioCtx.state });
+    // SFX
+    if (this.sfxOn) this.sfxTongue();
     // Draw attack with layered color for depth
     const start = this.player.getCenter();
     const len = this.tongueRange;
@@ -339,6 +352,7 @@ class GameScene extends Phaser.Scene {
         // FX
         this.hitEmitter.explode(Phaser.Math.Between(8, 12), e.x, e.y);
         this.cameras.main.shake(100, 0.004);
+        if (this.sfxOn) this.sfxHit();
         const pop = this.add.image(e.x, e.y, e.texture.key).setDepth((e.depth || 4) + 1);
         pop.setScale(e.scaleX || 1, e.scaleY || 1);
         this.tweens.add({
@@ -403,6 +417,7 @@ class GameScene extends Phaser.Scene {
   showUpgradeSelection() {
     this.isChoosingUpgrade = true;
     this.physics.pause();
+    if (this.sfxOn) this.sfxUpgradeOpen();
 
     // Dark overlay and panel
     const overlay = this.add.rectangle(this.worldWidth / 2, this.worldHeight / 2, this.worldWidth, this.worldHeight, 0x000000, 0.7).setDepth(30);
@@ -462,6 +477,7 @@ class GameScene extends Phaser.Scene {
   }
 
   applyUpgrade(up) {
+    if (this.sfxOn) this.sfxUpgradeSelect();
     // Apply
     switch (up.type) {
       case 'speed':
@@ -484,6 +500,140 @@ class GameScene extends Phaser.Scene {
     this.isChoosingUpgrade = false;
     this.physics.resume();
   }
+  initAudio() {
+    const hasPhaser = !!this.sound;
+    const phaserCtx = hasPhaser ? this.sound.context : null;
+    const phaserUsingWA = !!(hasPhaser && this.sound.usingWebAudio);
+    const AC = window.AudioContext || window.webkitAudioContext;
+
+    console.info('[Audio] initAudio()', {
+      hasPhaser,
+      phaserUsingWebAudio: phaserUsingWA,
+      phaserHasCtx: !!phaserCtx,
+      hasWindowAC: !!AC
+    });
+
+    // Prefer Phaser's WebAudio context when available
+    if (phaserUsingWA && phaserCtx) {
+      this.audioCtx = phaserCtx;
+      console.info('[Audio] Using Phaser AudioContext', { state: this.audioCtx.state });
+    } else if (AC) {
+      console.warn('[Audio] Falling back to standalone AudioContext (Phaser usingWebAudio=' + phaserUsingWA + ')');
+      try {
+        this.audioCtx = new AC();
+      } catch (e) {
+        console.error('[Audio] AudioContext creation failed', e);
+        this.sfxOn = false;
+        return;
+      }
+    } else {
+      console.warn('[Audio] No WebAudio available in this environment');
+      this.sfxOn = false;
+      return;
+    }
+
+    try {
+      this.masterGain = this.audioCtx.createGain();
+      this.masterGain.gain.value = 0.3;
+      this.masterGain.connect(this.audioCtx.destination);
+      console.info('[Audio] masterGain configured', { gain: this.masterGain.gain.value });
+    } catch (e) {
+      console.error('[Audio] masterGain setup failed', e);
+      this.sfxOn = false;
+      return;
+    }
+
+    const tryResume = (src) => {
+      if (!this.audioCtx) return;
+      if (this.audioCtx.state === 'suspended') {
+        console.info('[Audio] resume() requested via', src);
+        this.audioCtx.resume().then(() => {
+          console.info('[Audio] resumed; state=', this.audioCtx.state);
+        }).catch(err => {
+          console.error('[Audio] resume() failed', err);
+        });
+      }
+    };
+
+    // Unlock on first gesture from Phaser
+    if (this.input) {
+      this.input.once('pointerdown', () => tryResume('pointerdown'));
+      if (this.input.keyboard) {
+        this.input.keyboard.once('keydown', () => tryResume('keydown'));
+      }
+    }
+    // Extra safety: unlock on a window click as well
+    window.addEventListener('click', () => tryResume('window-click'), { once: true, passive: true });
+
+    this.sfxOn = true;
+    console.info('[Audio] SFX enabled');
+  }
+
+  playTone(opts = {}) {
+    if (!this.sfxOn || !this.audioCtx || !this.masterGain) {
+      console.warn('[Audio] playTone skipped', { sfxOn: this.sfxOn, hasCtx: !!this.audioCtx, hasMaster: !!this.masterGain });
+      return;
+    }
+
+    const ctx = this.audioCtx;
+    const type = opts.type || 'sine';
+    const startFreq = Math.max(1, opts.startFreq || 440);
+    const endFreq = Math.max(1, opts.endFreq == null ? startFreq : opts.endFreq);
+    const duration = Math.max(0.01, opts.duration || 0.1);
+    const attack = Math.max(0, Math.min(duration, opts.attack == null ? 0.005 : opts.attack));
+    const peak = Math.max(0.0001, Math.min(1, opts.volume == null ? 0.2 : opts.volume));
+    const startTime = ctx.currentTime + (opts.delay || 0);
+
+    console.debug('[Audio] playTone', { type, startFreq, endFreq, duration, attack, peak, startTime, ctxState: ctx.state });
+
+    const osc = ctx.createOscillator();
+    osc.type = type;
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, startTime);
+    gain.gain.exponentialRampToValueAtTime(peak, startTime + attack);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+
+    osc.frequency.setValueAtTime(startFreq, startTime);
+    if (endFreq !== startFreq) {
+      try {
+        osc.frequency.exponentialRampToValueAtTime(endFreq, startTime + duration);
+      } catch (err) {
+        osc.frequency.linearRampToValueAtTime(endFreq, startTime + duration);
+      }
+    }
+
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+
+    osc.onended = () => {
+      try { osc.disconnect(); } catch (e) {}
+      try { gain.disconnect(); } catch (e) {}
+      console.debug('[Audio] tone ended');
+    };
+
+    osc.start(startTime);
+    osc.stop(startTime + duration);
+  }
+
+  sfxTongue() {
+    const base = 300 + Phaser.Math.Between(-20, 20);
+    this.playTone({ type: 'sawtooth', startFreq: base, endFreq: base + 500, duration: 0.12, attack: 0.005, volume: 0.12 });
+  }
+
+  sfxHit() {
+    const base = 900 + Phaser.Math.Between(-60, 60);
+    this.playTone({ type: 'square', startFreq: base, endFreq: 140, duration: 0.12, attack: 0.001, volume: 0.18 });
+    this.playTone({ type: 'triangle', startFreq: base * 0.7, endFreq: 120, duration: 0.12, attack: 0.001, volume: 0.10, delay: 0.005 });
+  }
+
+  sfxUpgradeOpen() {
+    this.playTone({ type: 'triangle', startFreq: 380, endFreq: 720, duration: 0.22, attack: 0.005, volume: 0.12 });
+  }
+
+  sfxUpgradeSelect() {
+    this.playTone({ type: 'square', startFreq: 600, endFreq: 900, duration: 0.16, attack: 0.001, volume: 0.14 });
+  }
 }
 
 // Game configuration and bootstrapping
@@ -492,6 +642,7 @@ const config = {
   width: 800,
   height: 600,
   backgroundColor: '#0a0a0a',
+  audio: { disableWebAudio: false, noAudio: false },
   scene: [GameScene],
   physics: {
     default: 'arcade',
