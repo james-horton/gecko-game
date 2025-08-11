@@ -276,6 +276,9 @@ class GameScene extends Phaser.Scene {
     // World bounds
     this.physics.world.setBounds(0, 0, this.worldWidth, this.worldHeight);
 
+    // Debug: listen for world-bounds collisions (enemies only log)
+    this.physics.world.on('worldbounds', this.onWorldBoundsCollision, this);
+
     // Background
     this.bg = this.add.tileSprite(0, 0, this.worldWidth, this.worldHeight, 'ground_tile').setOrigin(0).setDepth(0);
 
@@ -493,6 +496,8 @@ class GameScene extends Phaser.Scene {
     const enemy = this.enemies.create(x, y, type);
     enemy.setData('type', type);
     enemy.setCollideWorldBounds(true);
+    enemy.setBounce(1, 1);
+    if (enemy.body) enemy.body.onWorldBounds = true;
     enemy.setDepth(4);
     // Tighter circular physics body for enemy
     {
@@ -521,6 +526,28 @@ class GameScene extends Phaser.Scene {
         ease: 'Sine.easeInOut'
       });
     }
+  }
+
+  // World-bounds collision logging for enemies
+  onWorldBoundsCollision(body, up, down, left, right) {
+    if (!body || !body.gameObject) return;
+    const go = body.gameObject;
+
+    // Only track enemies
+    if (!this.enemies || !this.enemies.contains(go)) return;
+
+    const sides = [];
+    if (left) sides.push('left');
+    if (right) sides.push('right');
+    if (up) sides.push('up');
+    if (down) sides.push('down');
+
+    console.debug('[Enemy] worldbounds', {
+      type: go.getData && go.getData('type'),
+      x: Math.round(go.x), y: Math.round(go.y),
+      vx: Math.round(body.velocity.x), vy: Math.round(body.velocity.y),
+      sides: sides.join('|') || 'none'
+    });
   }
 
   showUpgradeSelection() {
