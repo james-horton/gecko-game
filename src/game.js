@@ -21,6 +21,23 @@ class GameScene extends Phaser.Scene {
     this.upgradeUI = [];
     this.worldWidth = 800;
     this.worldHeight = 600;
+
+    // Combat / Health
+    this.maxHealth = 5;
+    this.health = this.maxHealth;
+    this.invulnDuration = 800; // ms of invulnerability after a hit
+    this.invulnUntil = 0;
+    this.isDead = false;
+
+    // Hitbox tuning
+    this.playerBodyRadiusFactor = 0.38; // circle radius = min(frameW, frameH) * factor
+    this.enemyBodyRadiusFactor = 0.36;  // tighter enemy bodies
+
+    // UI / FX
+    this.healthGfx = null;
+    this.healthText = null;
+    this.redFlash = null;
+
     // Visual polish
     this.bg = null;
     this.shadow = null;
@@ -223,6 +240,14 @@ class GameScene extends Phaser.Scene {
     this.player = this.physics.add.sprite(this.worldWidth / 2, this.worldHeight / 2, 'gecko');
     this.player.setCollideWorldBounds(true);
     this.player.setDepth(5);
+    // Tighter circular physics body for player
+    {
+      const pMin = Math.min(this.player.width, this.player.height);
+      const r = Math.floor(pMin * this.playerBodyRadiusFactor);
+      const ox = this.player.width / 2 - r;
+      const oy = this.player.height / 2 - r;
+      this.player.body.setCircle(r, ox, oy);
+    }
 
     // Shadow under player (not physics)
     this.shadow = this.add.image(this.player.x, this.player.y + 18, 'shadow_oval').setAlpha(0.35).setDepth(1);
@@ -268,6 +293,28 @@ class GameScene extends Phaser.Scene {
     this.killsText.setStroke('#000000', 3);
     this.killsText.setShadow(0, 2, '#000000', 2, true, true);
 
+    // Health UI
+    this.healthGfx = this.add.graphics().setDepth(20);
+    this.healthText = this.add.text(8, 56, 'HP: ' + this.health + '/' + this.maxHealth, {
+      fontFamily: 'monospace',
+      fontSize: '16px',
+      color: '#ffffff'
+    }).setDepth(20);
+    this.healthText.setStroke('#000000', 3);
+    this.healthText.setShadow(0, 2, '#000000', 2, true, true);
+    this.updateHealthUI();
+
+    // Damage flash overlay
+    this.redFlash = this.add
+      .rectangle(this.worldWidth / 2, this.worldHeight / 2, this.worldWidth, this.worldHeight, 0xff0000, 0)
+      .setDepth(35);
+
+    // Enemy attacks via contact damage
+    this.physics.add.overlap(this.player, this.enemies, this.onPlayerEnemyOverlap, null, this);
+
+    // Spawn protection
+    this.invulnUntil = this.time.now + 1000;
+
     // Audio
     this.initAudio();
     // One-time audio test on first click to verify unlock
@@ -282,8 +329,10 @@ class GameScene extends Phaser.Scene {
   update() {
     if (!this.player) return;
 
+    const now = this.time.now;
+   
     // Movement
-    const speed = this.speed;
+    const speed = this.isDead ? 0 : this.speed;
     let vx = 0;
     let vy = 0;
     if (this.cursors.left.isDown) vx -= speed;
@@ -291,25 +340,29 @@ class GameScene extends Phaser.Scene {
     if (this.cursors.up.isDown) vy -= speed;
     if (this.cursors.down.isDown) vy += speed;
     this.player.setVelocity(vx, vy);
-
+  
     // Update last facing direction
     if (vx !== 0 || vy !== 0) {
       this.lastDirection.set(vx, vy).normalize();
     }
     const angle = Math.atan2(this.lastDirection.y, this.lastDirection.x);
-
+  
     // Rotate player to face direction
     this.player.setRotation(angle);
-
+  
     // Keep shadow and sunglasses aligned
     const headOffset = new Phaser.Math.Vector2(18, -6).rotate(angle);
     this.sunglasses.setPosition(this.player.x + headOffset.x, this.player.y + headOffset.y);
     this.sunglasses.setRotation(angle);
     this.shadow.setPosition(this.player.x, this.player.y + 18);
 
+    // Invulnerability blink
+    const inv = now < this.invulnUntil;
+    this.player.setAlpha(inv ? 0.6 : 1);
+    this.sunglasses.setAlpha(inv ? 0.7 : (this.isDead ? 0.3 : 1));
+  
     // Attack input (space)
-    const now = this.time.now;
-    if (Phaser.Input.Keyboard.JustDown(this.spaceKey) && !this.isChoosingUpgrade) {
+    if (Phaser.Input.Keyboard.JustDown(this.spaceKey) && !this.isChoosingUpgrade && !this.isDead) {
       if (now - this.lastAttackTime >= this.attackCooldown) {
         this.lastAttackTime = now;
         this.performTongueAttack();
@@ -348,7 +401,10 @@ class GameScene extends Phaser.Scene {
     for (let i = enemies.length - 1; i >= 0; i--) {
       const e = enemies[i];
       if (!e.active) continue;
-      if (Phaser.Geom.Intersects.LineToRectangle(line, e.getBounds())) {
+
+      const ec = e.getCenter();
+      const r = e.body ? Math.min(e.body.width, e.body.height) * 0.5 : Math.min(e.displayWidth, e.displayHeight) * this.enemyBodyRadiusFactor;
+      if (Phaser.Geom.Intersects.LineToCircle(line, new Phaser.Geom.Circle(ec.x, ec.y, r))) {
         // FX
         this.hitEmitter.explode(Phaser.Math.Between(8, 12), e.x, e.y);
         this.cameras.main.shake(100, 0.004);
@@ -395,6 +451,16 @@ class GameScene extends Phaser.Scene {
     enemy.setData('type', type);
     enemy.setCollideWorldBounds(true);
     enemy.setDepth(4);
+    // Tighter circular physics body for enemy
+    {
+      const eMin = Math.min(enemy.width, enemy.height);
+      const er = Math.floor(eMin * this.enemyBodyRadiusFactor);
+      const eox = enemy.width / 2 - er;
+      const eoy = enemy.height / 2 - er;
+      if (enemy.body && enemy.body.setCircle) {
+        enemy.body.setCircle(er, eox, eoy);
+      }
+    }
     if (type === 'enemy_beetle') {
       const sp = Phaser.Math.Between(40, 80);
       const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
@@ -633,6 +699,125 @@ class GameScene extends Phaser.Scene {
 
   sfxUpgradeSelect() {
     this.playTone({ type: 'square', startFreq: 600, endFreq: 900, duration: 0.16, attack: 0.001, volume: 0.14 });
+  }
+
+  // Health bar and text
+  updateHealthUI() {
+    if (!this.healthGfx) return;
+    const x = 8;
+    const y = 38;
+    const w = 140;
+    const h = 14;
+    const pct = Phaser.Math.Clamp(this.health / this.maxHealth, 0, 1);
+
+    this.healthGfx.clear();
+    // Border/Backdrop
+    this.healthGfx.fillStyle(0x000000, 0.4);
+    this.healthGfx.fillRoundedRect(x - 3, y - 3, w + 6, h + 6, 8);
+    // Background
+    this.healthGfx.fillStyle(0x2b0d0d, 0.95);
+    this.healthGfx.fillRoundedRect(x, y, w, h, 6);
+    // Fill
+    const fillColor = pct > 0.5 ? 0x27ae60 : (pct > 0.25 ? 0xf39c12 : 0xe74c3c);
+    this.healthGfx.fillStyle(fillColor, 1);
+    this.healthGfx.fillRoundedRect(x, y, Math.max(0, Math.floor(w * pct)), h, 6);
+    // Shine
+    if (pct > 0) {
+      this.healthGfx.fillStyle(0xffffff, 0.15);
+      this.healthGfx.fillRoundedRect(x + 4, y + 3, Math.max(0, Math.floor((w - 8) * pct)), 4, 3);
+    }
+
+    if (this.healthText) {
+      this.healthText.setText('HP: ' + this.health + '/' + this.maxHealth);
+    }
+  }
+
+
+  // Enemy contact damage
+  onPlayerEnemyOverlap(player, enemy) {
+    if (!enemy || !enemy.active || this.isDead) return;
+
+
+    const dmg = enemy.getData('type') === 'enemy_beetle' ? 2 : 1;
+    this.takeDamage(dmg, enemy);
+  }
+
+  takeDamage(amount = 1, source = null) {
+    if (this.isDead) return;
+    const now = this.time.now;
+    if (now < this.invulnUntil) return;
+
+    this.health = Math.max(0, this.health - amount);
+    this.invulnUntil = now + this.invulnDuration;
+
+    // SFX and camera shake
+    if (this.sfxOn) this.sfxHurt();
+    this.cameras.main.shake(120, 0.006);
+
+    // Screen flash
+    if (this.redFlash) {
+      this.redFlash.setAlpha(0.25);
+      this.tweens.add({ targets: this.redFlash, alpha: 0, duration: 160, ease: 'Quad.easeOut' });
+    }
+
+    // Knockback
+    if (source && this.player && this.player.body) {
+      const p = this.player.getCenter();
+      const s = source.getCenter();
+      const dir = new Phaser.Math.Vector2(p.x - s.x, p.y - s.y).normalize();
+      this.player.body.velocity.x += dir.x * 200;
+      this.player.body.velocity.y += dir.y * 200;
+    }
+
+    this.updateHealthUI();
+
+    if (this.health <= 0) {
+      this.onPlayerDeath();
+    }
+  }
+
+  onPlayerDeath() {
+    if (this.isDead) return;
+    this.isDead = true;
+
+    if (this.sfxOn) this.sfxDie();
+    this.physics.pause();
+
+    // Visual state
+    this.player.setTint(0x444444);
+    this.sunglasses.setAlpha(0.3);
+
+    // Overlay UI
+    const overlay = this.add
+      .rectangle(this.worldWidth / 2, this.worldHeight / 2, this.worldWidth, this.worldHeight, 0x000000, 0.7)
+      .setDepth(40);
+    const title = this.add.text(this.worldWidth / 2, this.worldHeight / 2 - 20, 'Game Over', {
+      fontFamily: 'monospace',
+      fontSize: '48px',
+      color: '#ffffff'
+    }).setOrigin(0.5).setDepth(41);
+    title.setShadow(0, 4, '#000000', 4, true, true);
+
+    const prompt = this.add.text(this.worldWidth / 2, this.worldHeight / 2 + 40, 'Press R to Restart', {
+      fontFamily: 'monospace',
+      fontSize: '20px',
+      color: '#ffffff'
+    }).setOrigin(0.5).setDepth(41);
+    prompt.setShadow(0, 2, '#000000', 2, true, true);
+
+    const restart = () => this.scene.restart();
+    this.input.keyboard.once('keydown-R', restart);
+    this.input.once('pointerdown', restart);
+  }
+
+  sfxHurt() {
+    const base = 520 + Phaser.Math.Between(-20, 20);
+    this.playTone({ type: 'sawtooth', startFreq: base, endFreq: 240, duration: 0.10, attack: 0.001, volume: 0.12 });
+    this.playTone({ type: 'square', startFreq: base * 0.8, endFreq: 180, duration: 0.10, attack: 0.001, volume: 0.08, delay: 0.03 });
+  }
+
+  sfxDie() {
+    this.playTone({ type: 'triangle', startFreq: 220, endFreq: 60, duration: 0.40, attack: 0.002, volume: 0.14 });
   }
 }
 
