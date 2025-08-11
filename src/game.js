@@ -229,7 +229,50 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  init() {
+    // Reset core state on scene (re)start. Phaser calls init() on start and restart.
+    const before = {
+      health: this.health,
+      isDead: this.isDead,
+      enemiesDefeated: this.enemiesDefeated,
+      speed: this.speed,
+      tongueRange: this.tongueRange,
+      attackCooldown: this.attackCooldown
+    };
+
+    // Baseline values
+    this.maxHealth = 5;
+    this.health = this.maxHealth;
+    this.isDead = false;
+    this.enemiesDefeated = 0;
+    this.isChoosingUpgrade = false;
+    this.upgradeChoices = [];
+    this.speed = 220;
+    this.tongueRange = 120;
+    this.attackCooldown = 220;
+    this.lastAttackTime = 0;
+    this.lastDirection = new Phaser.Math.Vector2(1, 0);
+
+    // Clear transient refs
+    this.tongue = null;
+    this.tongueTip = null;
+    this.upgradeUI = [];
+
+    console.info('[Scene] init() reset', {
+      before,
+      after: {
+        health: this.health,
+        isDead: this.isDead,
+        enemiesDefeated: this.enemiesDefeated,
+        speed: this.speed,
+        tongueRange: this.tongueRange,
+        attackCooldown: this.attackCooldown
+      }
+    });
+  }
+
   create() {
+    console.info('[Scene] create() start', { health: this.health, isDead: this.isDead });
     // World bounds
     this.physics.world.setBounds(0, 0, this.worldWidth, this.worldHeight);
 
@@ -805,9 +848,15 @@ class GameScene extends Phaser.Scene {
     }).setOrigin(0.5).setDepth(41);
     prompt.setShadow(0, 2, '#000000', 2, true, true);
 
-    const restart = () => this.scene.restart();
-    this.input.keyboard.once('keydown-R', restart);
-    this.input.once('pointerdown', restart);
+    console.info('[Scene] Game Over - waiting for restart');
+    this.input.keyboard.once('keydown-R', () => {
+      console.info('[Scene] keydown-R -> scene.restart()');
+      this.scene.restart();
+    });
+    this.input.once('pointerdown', () => {
+      console.info('[Scene] pointerdown -> scene.restart()');
+      this.scene.restart();
+    });
   }
 
   sfxHurt() {
