@@ -9,6 +9,11 @@ class GameScene extends Phaser.Scene {
     this.lastDirection = new Phaser.Math.Vector2(1, 0);
     this.enemies = null;
     this.enemiesDefeated = 0;
+    // Loot / pickups
+    this.hearts = null;
+    this.heartDropChance = 0.25; // 25% chance to drop a heart on enemy death
+    this.heartHealAmount = 1;
+    // Upgrades / combat
     this.isChoosingUpgrade = false;
     this.upgradeChoices = [];
     this.tongueRange = 120;
@@ -216,7 +221,22 @@ class GameScene extends Phaser.Scene {
       sp.generateTexture('splat_particle', 8, 8);
       sp.destroy();
     }
-
+    
+    // Heart pickup
+    {
+      const hg = this.make.graphics({ x: 0, y: 0, add: false });
+      hg.fillStyle(0xff4d6d, 1);
+      // Two circles + triangle to form a heart
+      hg.fillCircle(10, 9, 8);
+      hg.fillCircle(20, 9, 8);
+      hg.fillTriangle(2, 13, 28, 13, 16, 28);
+      // Small gloss highlight
+      hg.fillStyle(0xffffff, 0.18);
+      hg.fillCircle(8, 7, 3);
+      hg.generateTexture('heart_pickup', 32, 32);
+      hg.destroy();
+    }
+    
     // Upgrade panel background
     {
       const bg = this.make.graphics({ x: 0, y: 0, add: false });
@@ -329,7 +349,11 @@ class GameScene extends Phaser.Scene {
     for (let i = 0; i < 8; i++) {
       this.spawnEnemy();
     }
-
+    
+    // Hearts
+    this.hearts = this.physics.add.group({ allowGravity: false, immovable: true });
+    this.physics.add.overlap(this.player, this.hearts, this.onPlayerHeartOverlap, null, this);
+    
     // Text UI
     this.killsText = this.add.text(8, 8, 'Kills: 0', {
       fontFamily: 'monospace',
@@ -467,7 +491,10 @@ class GameScene extends Phaser.Scene {
           onComplete: () => pop.destroy()
         });
 
+        const hx = e.x;
+        const hy = e.y;
         e.destroy();
+        this.trySpawnHeart(hx, hy);
         this.enemiesDefeated++;
         killsThisAttack++;
         this.killsText.setText('Kills: ' + this.enemiesDefeated);
@@ -527,7 +554,57 @@ class GameScene extends Phaser.Scene {
       });
     }
   }
-
+  
+  // Loot: health heart drop
+  trySpawnHeart(x, y) {
+    if (!this.hearts) return;
+    if (Math.random() >= this.heartDropChance) return;
+    const heart = this.hearts.create(x, y, 'heart_pickup');
+    heart.setDepth(4);
+    if (heart.body && heart.body.setCircle) {
+      const r = Math.floor(Math.min(heart.width, heart.height) * 0.4);
+      const ox = (heart.width / 2) - r;
+      const oy = (heart.height / 2) - r;
+      heart.body.setCircle(r, ox, oy);
+      heart.body.setAllowGravity(false);
+      heart.body.immovable = true;
+      heart.body.setBounce(0, 0);
+      heart.setVelocity(0, 0);
+    }
+    // Gentle bobbing to draw attention
+    this.tweens.add({
+      targets: heart,
+      y: heart.y - 6,
+      scale: { from: 1.0, to: 1.08 },
+      duration: 800,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut'
+    });
+  }
+  
+  onPlayerHeartOverlap(player, heart) {
+    if (!heart || !heart.active) return;
+    // Heal
+    if (this.health < this.maxHealth) {
+      this.health = Math.min(this.maxHealth, this.health + this.heartHealAmount);
+      this.updateHealthUI();
+    }
+    // Pickup FX
+    if (this.sfxOn) this.sfxPickup();
+    const pop = this.add.image(heart.x, heart.y, 'heart_pickup').setDepth(11);
+    this.tweens.add({
+      targets: pop,
+      y: heart.y - 12,
+      scale: 1.3,
+      alpha: 0,
+      duration: 200,
+      ease: 'Quad.easeOut',
+      onComplete: () => pop.destroy()
+    });
+    heart.destroy();
+  }
+  
   // World-bounds collision logging for enemies
   onWorldBoundsCollision(body, up, down, left, right) {
     if (!body || !body.gameObject) return;
@@ -770,7 +847,13 @@ class GameScene extends Phaser.Scene {
   sfxUpgradeSelect() {
     this.playTone({ type: 'square', startFreq: 600, endFreq: 900, duration: 0.16, attack: 0.001, volume: 0.14 });
   }
-
+  
+  sfxPickup() {
+    // Pleasant pickup chirp
+    this.playTone({ type: 'triangle', startFreq: 680, endFreq: 1000, duration: 0.10, attack: 0.001, volume: 0.12 });
+    this.playTone({ type: 'sine', startFreq: 1000, endFreq: 1400, duration: 0.08, attack: 0.001, volume: 0.06, delay: 0.02 });
+  }
+  
   // Health bar and text
   updateHealthUI() {
     if (!this.healthGfx) return;
