@@ -818,14 +818,26 @@ class GameScene extends Phaser.Scene {
       const e = enemies[i];
       if (!e.active) continue;
 
-      const ec = e.getCenter();
-      const r = e.body ? Math.min(e.body.width, e.body.height) * 0.5 : Math.min(e.displayWidth, e.displayHeight) * this.enemyBodyRadiusFactor;
-      if (Phaser.Geom.Intersects.LineToCircle(line, new Phaser.Geom.Circle(ec.x, ec.y, r))) {
+      const type = e.getData && e.getData('type');
+      let hit = false;
+      if (type === 'enemy_caterpillar') {
+        // Use expanded axis-aligned rectangle for elongated body (wider head/tail coverage)
+        const b = e.getBounds();
+        const padW = 8;
+        const padH = 4;
+        const rect = new Phaser.Geom.Rectangle(b.x - padW / 2, b.y - padH / 2, b.width + padW, b.height + padH);
+        hit = Phaser.Geom.Intersects.LineToRectangle(line, rect);
+      } else {
+        const ec = e.getCenter();
+        const r = e.body ? Math.min(e.body.width, e.body.height) * 0.5 : Math.min(e.displayWidth, e.displayHeight) * this.enemyBodyRadiusFactor;
+        hit = Phaser.Geom.Intersects.LineToCircle(line, new Phaser.Geom.Circle(ec.x, ec.y, r));
+      }
+      if (hit) {
         // Hit FX each time
         this.hitEmitter.explode(Phaser.Math.Between(8, 12), e.x, e.y);
         this.cameras.main.shake(100, 0.004);
         if (this.sfxOn) this.sfxHit();
-
+  
         const killed = this.damageEnemy(e, 1);
         if (killed) {
           killsThisAttack++;
