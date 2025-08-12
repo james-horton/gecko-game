@@ -142,52 +142,56 @@ class GameScene extends Phaser.Scene {
       sh.destroy();
     }
 
-    // Improved Gecko sprite: curved tail, toe pads, shading, and specular highlights
+    // Chameleon sprite: coiled tail, casque crest, stripe bands, turret eye
     {
       const g1 = this.make.graphics({ x: 0, y: 0, add: false });
       // Palette
-      const cBase = 0x33cc88;   // body base
-      const cBelly = 0xa7f0c5;  // belly/underside
-      const cDark = 0x1f8f66;   // dorsal/dark limbs
-      const cSpot = 0x187f59;   // spots
-      const cOutline = 0x0e3b2e;// outline
+      const cBase   = 0x6ecb3a;  // body base
+      const cBelly  = 0xcdf7b8;  // belly/underside
+      const cDark   = 0x3b8c2a;  // dorsal/dark limbs
+      const cStripe = 0x2e6d21;  // banding
+      const cOutline= 0x103d1a;  // outline
 
-      // Tail: tapered curved chain of circles
+      // Tail: coiled spiral made of circles
       g1.fillStyle(cBase, 1);
-      for (let i = 0; i < 14; i++) {
-        const t = i / 13;
-        const x = 28 - t * 24 + Math.sin(t * 2.1) * 3;
-        const y = 36 - t * 4 + Math.sin(t * Math.PI) * 6;
-        const r = 12 - t * 9;
-        g1.fillCircle(x, y, r);
+      for (let i = 0; i <= 18; i++) {
+        const t = i / 18;
+        const ang = t * Math.PI * 2.2 + Math.PI * 0.25;
+        const rr  = 15 - t * 11;
+        const cx = 30 - Math.cos(ang) * (8 + t * 14);
+        const cy = 42 - Math.sin(ang) * (8 + t * 10);
+        g1.fillCircle(cx, cy, Math.max(3, rr));
       }
       // Dorsal shade on tail
       g1.fillStyle(cDark, 0.85);
-      for (let i = 0; i < 12; i++) {
-        const t = i / 11;
-        const x = 28 - t * 22 + Math.sin(t * 2.1) * 3;
-        const y = 36 - t * 4 + Math.sin(t * Math.PI) * 5 - 2;
-        const r = (10 - t * 7) * 0.6;
-        g1.fillCircle(x, y, r);
+      for (let i = 0; i <= 16; i++) {
+        const t = i / 16;
+        const ang = t * Math.PI * 2.2 + Math.PI * 0.25;
+        const rr  = (12 - t * 9) * 0.55;
+        const cx = 30 - Math.cos(ang) * (8 + t * 14);
+        const cy = 40 - Math.sin(ang) * (8 + t * 10);
+        g1.fillCircle(cx, cy, Math.max(1, rr));
       }
 
       // Body
       g1.fillStyle(cBase, 1);
-      g1.fillEllipse(50, 36, 74, 40);
+      g1.fillEllipse(50, 36, 74, 38);
 
       // Belly highlight
       g1.fillStyle(cBelly, 1);
-      g1.fillEllipse(44, 40, 44, 22);
+      g1.fillEllipse(46, 40, 46, 20);
 
-      // Head
+      // Head with casque crest
       g1.fillStyle(cBase, 1);
-      g1.fillEllipse(78, 30, 30, 24);
+      g1.fillEllipse(80, 30, 30, 22);
+      // Casque (crest)
+      g1.fillTriangle(72, 18, 90, 18, 82, 8);
 
       // Mouth line (subtle)
       g1.lineStyle(2, cOutline, 0.6);
       g1.beginPath();
-      g1.moveTo(82, 36);
-      g1.lineTo(92, 34);
+      g1.moveTo(82, 34);
+      g1.lineTo(94, 32);
       g1.strokePath();
 
       // Legs
@@ -196,41 +200,29 @@ class GameScene extends Phaser.Scene {
       g1.fillEllipse(22, 50, 18, 8);
       g1.fillEllipse(58, 56, 18, 8);
       g1.fillEllipse(70, 50, 18, 8);
-      // Toe pads
+      // Zygodactyl toe pads
+      g1.fillStyle(0x2f7a25, 1);
       const toes = [
-        {x: 40, y: 58}, {x: 36, y: 60}, {x: 32, y: 59},
-        {x: 18, y: 50}, {x: 22, y: 52}, {x: 26, y: 51},
-        {x: 64, y: 58}, {x: 60, y: 60}, {x: 56, y: 59},
-        {x: 72, y: 50}, {x: 76, y: 51}, {x: 80, y: 49}
+        {x: 40, y: 58}, {x: 36, y: 60},
+        {x: 18, y: 50}, {x: 22, y: 52},
+        {x: 64, y: 58}, {x: 60, y: 60},
+        {x: 72, y: 50}, {x: 76, y: 51}
       ];
-      g1.fillStyle(0x2aa876, 1);
-      for (const t of toes) g1.fillCircle(t.x, t.y, 2.2);
+      for (const t of toes) g1.fillCircle(t.x, t.y, 2.4);
 
-      // Eye with iris and highlight
+      // Turret eye with highlight
       g1.fillStyle(0xffffff, 1);
-      g1.fillCircle(88, 26, 6);
-      g1.fillStyle(0x263238, 1);
-      g1.fillCircle(89, 26, 3);
-      g1.fillStyle(0xffffff, 1);
-      g1.fillCircle(91, 25, 1.5);
-      // Eyelid accent
-      g1.lineStyle(2, cOutline, 0.7);
-      g1.beginPath();
-      g1.moveTo(82, 22);
-      g1.lineTo(94, 22);
-      g1.strokePath();
+      g1.fillCircle(88, 24, 6);
+      g1.fillStyle(0x24342a, 1);
+      g1.fillCircle(88, 24, 2.8);
+      g1.fillStyle(0xffffff, 0.8);
+      g1.fillCircle(90, 23, 1.3);
 
-      // Spots
-      g1.fillStyle(cSpot, 1);
-      const spots = [
-        {x: 54, y: 24, r: 4},
-        {x: 44, y: 30, r: 3},
-        {x: 64, y: 38, r: 3},
-        {x: 68, y: 24, r: 3},
-        {x: 52, y: 44, r: 2},
-        {x: 36, y: 36, r: 2}
-      ];
-      for (const s of spots) g1.fillCircle(s.x, s.y, s.r);
+      // Body banding
+      g1.fillStyle(cStripe, 0.95);
+      g1.fillEllipse(56, 26, 22, 8);
+      g1.fillEllipse(66, 36, 24, 8);
+      g1.fillEllipse(74, 44, 20, 7);
 
       // Body sheen
       g1.fillStyle(0xffffff, 0.10);
@@ -238,10 +230,10 @@ class GameScene extends Phaser.Scene {
 
       // Outlines
       g1.lineStyle(2, cOutline, 0.6);
-      g1.strokeEllipse(50, 36, 74, 40);
-      g1.strokeEllipse(78, 30, 30, 24);
+      g1.strokeEllipse(50, 36, 74, 38);
+      g1.strokeEllipse(80, 30, 30, 22);
 
-      g1.generateTexture('gecko', 96, 64);
+      g1.generateTexture('chameleon', 96, 64);
       g1.destroy();
     }
 
@@ -443,13 +435,13 @@ class GameScene extends Phaser.Scene {
       ag.destroy();
     }
 
-    // Armor overlay texture rendered on the gecko when equipped
+    // Armor overlay texture rendered on the chameleon when equipped
     {
       const og = this.make.graphics({ x: 0, y: 0, add: false });
       // Transparent base
       og.fillStyle(0x000000, 0);
       og.fillRect(0, 0, 96, 64);
-      // Chain pattern sized to gecko sprite (96x64)
+      // Chain pattern sized to chameleon sprite (96x64)
       og.lineStyle(2, 0xbac6d6, 0.8);
       for (let yy = 8; yy <= 56; yy += 12) {
         for (let xx = 12; xx <= 84; xx += 12) {
@@ -594,7 +586,7 @@ class GameScene extends Phaser.Scene {
     }
 
     // Player
-    this.player = this.physics.add.sprite(this.worldWidth / 2, this.worldHeight / 2, 'gecko');
+    this.player = this.physics.add.sprite(this.worldWidth / 2, this.worldHeight / 2, 'chameleon');
     this.player.setCollideWorldBounds(true);
     this.player.setDepth(5);
     // Tighter circular physics body for player
