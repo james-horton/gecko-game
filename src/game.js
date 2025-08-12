@@ -339,23 +339,29 @@ class GameScene extends Phaser.Scene {
     // Enemies: caterpillar (tank)
     {
       const cg = this.make.graphics({ x: 0, y: 0, add: false });
-      // Body segments
-      cg.fillStyle(0x2ec27e, 1);
+      // Body segments - yellow base
       const segs = 6;
+      cg.fillStyle(0xffd600, 1);
       for (let i = 0; i < segs; i++) {
-        cg.fillEllipse(12 + i * 9, 18, 18, 14);
+        const cx = 12 + i * 9;
+        cg.fillEllipse(cx, 18, 18, 14);
       }
-      // Head
-      cg.fillStyle(0x26a269, 1);
+      // Black stripes on each segment (vertical narrow ellipses to stay within body)
+      cg.fillStyle(0x111111, 1);
+      for (let i = 0; i < segs; i++) {
+        const cx = 12 + i * 9;
+        cg.fillEllipse(cx - 4, 18, 3, 12);
+        cg.fillEllipse(cx,     18, 3, 14);
+        cg.fillEllipse(cx + 4, 18, 3, 12);
+      }
+      // Head - yellow with two stripes
+      cg.fillStyle(0xffd600, 1);
       cg.fillEllipse(10, 18, 20, 16);
-      // Spots
-      cg.fillStyle(0x238c6a, 1);
-      cg.fillCircle(22, 14, 2);
-      cg.fillCircle(30, 20, 2);
-      cg.fillCircle(38, 14, 2);
-      cg.fillCircle(46, 20, 2);
-      // Legs
-      cg.lineStyle(2, 0x1a4d3b, 1);
+      cg.fillStyle(0x111111, 1);
+      cg.fillEllipse(10 - 4, 18, 4, 14);
+      cg.fillEllipse(10 + 4, 18, 4, 14);
+      // Legs (dark)
+      cg.lineStyle(2, 0x111111, 1);
       for (let lx = 14; lx <= 56; lx += 8) {
         cg.beginPath();
         cg.moveTo(lx, 28); cg.lineTo(lx - 4, 34);
