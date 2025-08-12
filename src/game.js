@@ -789,7 +789,12 @@ class GameScene extends Phaser.Scene {
     // SFX
     if (this.sfxOn) this.sfxTongue();
     // Draw attack with layered color for depth
-    const start = this.player.getCenter();
+    // Compute mouth world position (offset from sprite center, rotated to face lastDirection)
+    const angle = Math.atan2(this.lastDirection.y, this.lastDirection.x);
+    const center = this.player.getCenter();
+    // Mouth is around (82,33) in a 96x64 sprite whose center is (48,32) => local offset ~ (+34, +1)
+    const mouthOffset = new Phaser.Math.Vector2(34, 1).rotate(angle);
+    const start = new Phaser.Math.Vector2(center.x + mouthOffset.x, center.y + mouthOffset.y);
     const len = this.tongueRange;
     const end = new Phaser.Math.Vector2(start.x + this.lastDirection.x * len, start.y + this.lastDirection.y * len);
 
