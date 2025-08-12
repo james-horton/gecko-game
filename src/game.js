@@ -25,6 +25,9 @@ class GameScene extends Phaser.Scene {
     this.armorDropChance = 0.15; // 15% chance to drop armor on enemy death
     this.hasArmor = false;
     this.armorOverlay = null;
+    // Armor durability (number of hits while armored)
+    this.maxArmorHits = 5;
+    this.armorHitsRemaining = 0;
     // Spray weapon pickups
     this.sprayCans = null;
     this.sprayDropChance = 0.12; // 12% chance to drop a spray can on enemy death
@@ -526,6 +529,7 @@ class GameScene extends Phaser.Scene {
     this.health = this.maxHealth;
     this.isDead = false;
     this.hasArmor = false;
+    this.armorHitsRemaining = 0;
     this.enemiesDefeated = 0;
     this.waspsUnlocked = false;
     this.isChoosingUpgrade = false;
@@ -1034,6 +1038,18 @@ class GameScene extends Phaser.Scene {
 
   onPlayerProjectileOverlap(player, proj) {
     if (!proj || !proj.active || this.isDead) return;
+    const now = this.time.now;
+    try {
+      console.info('[HIT] projectile overlap', {
+        type: proj.texture ? proj.texture.key : null,
+        amount: 1,
+        hasArmor: this.hasArmor,
+        health: this.health,
+        now,
+        invulnUntil: this.invulnUntil,
+        invulnActive: now < this.invulnUntil
+      });
+    } catch (e) {}
     this.takeDamage(1, proj);
     this.hitEmitter.explode(6, proj.x, proj.y);
     proj.destroy();
@@ -1240,6 +1256,10 @@ class GameScene extends Phaser.Scene {
   onPlayerArmorOverlap(player, armor) {
     if (!armor || !armor.active) return;
     this.hasArmor = true;
+    this.armorHitsRemaining = this.maxArmorHits;
+    try {
+      console.info('[ARMOR] equipped', { maxHits: this.maxArmorHits, hitsRemaining: this.armorHitsRemaining });
+    } catch (e) {}
 
     // Visual feedback
     if (this.armorOverlay) {
@@ -1597,6 +1617,18 @@ class GameScene extends Phaser.Scene {
     const dmg = enemy.getData('contactDamage') != null
       ? enemy.getData('contactDamage')
       : (enemy.getData('type') === 'enemy_beetle' ? 2 : 1);
+    const now = this.time.now;
+    try {
+      console.info('[HIT] enemy overlap', {
+        type: enemy.getData && enemy.getData('type'),
+        contactDamage: dmg,
+        hasArmor: this.hasArmor,
+        health: this.health,
+        now,
+        invulnUntil: this.invulnUntil,
+        invulnActive: now < this.invulnUntil
+      });
+    } catch (e) {}
     this.takeDamage(dmg, enemy);
   }
 
@@ -1606,9 +1638,44 @@ class GameScene extends Phaser.Scene {
     if (now < this.invulnUntil) return;
 
     // Armor reduces incoming damage by half
-    const finalDmg = this.hasArmor ? Math.ceil(amount * 0.5) : amount;
+    const usedArmor = !!this.hasArmor;
+    const halved = usedArmor ? (amount * 0.5) : amount;
+    const finalDmg = usedArmor ? Math.floor(halved) : amount;
+
+    // Debug: log damage computation to validate rounding/armor
+    try {
+      const srcType = source && source.getData ? source.getData('type') : (source && source.texture ? source.texture.key : null);
+      const healthBefore = this.health;
+      console.info('[DMG] takeDamage', {
+        amount,
+        hasArmor: usedArmor,
+        halved,
+        rounding: usedArmor ? 'floor' : 'none',
+        finalDmg,
+        healthBefore,
+        healthAfter: Math.max(0, healthBefore - finalDmg),
+        invulnActive: now < this.invulnUntil,
+        srcType
+      });
+    } catch (e) {
+      // no-op
+    }
+
     this.health = Math.max(0, this.health - finalDmg);
     this.invulnUntil = now + this.invulnDuration;
+
+    // Track armor durability: consume one hit while armored
+    if (this.hasArmor) {
+      this.armorHitsRemaining = Math.max(0, (this.armorHitsRemaining || 0) - 1);
+      console.info('[ARMOR] hit consumed', { remaining: this.armorHitsRemaining });
+      if (this.armorHitsRemaining === 0) {
+        // Armor breaks: remove effect and visuals
+        this.hasArmor = false;
+        if (this.armorOverlay) this.armorOverlay.setVisible(false);
+        if (this.player) this.player.clearTint();
+        console.info('[ARMOR] broke and removed');
+      }
+    }
 
     // SFX and camera shake
     if (this.sfxOn) this.sfxHurt();
