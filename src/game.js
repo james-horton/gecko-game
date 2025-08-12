@@ -1370,24 +1370,61 @@ class GameScene extends Phaser.Scene {
     this.upgradeChoices = this.getRandomUpgrades(3);
 
     const makeButton = (y, text, onClick) => {
-      const btn = this.add.text(this.worldWidth / 2, y, text, {
+      // Create a container so we can draw a custom rounded box + label
+      const container = this.add.container(this.worldWidth / 2, y).setDepth(32);
+
+      // Label
+      const label = this.add.text(0, 0, text, {
         fontFamily: 'monospace',
         fontSize: '20px',
         color: '#ffffff',
-        backgroundColor: '#333333',
-        padding: { x: 18, y: 12 },
         align: 'center'
-      }).setOrigin(0.5).setDepth(32).setInteractive({ useHandCursor: true });
-      btn.setStroke('#000000', 2);
-      btn.setShadow(0, 2, '#000000', 2, true, true);
-      btn.on('pointerover', () => btn.setStyle({ backgroundColor: '#555555' }));
-      btn.on('pointerout', () => btn.setStyle({ backgroundColor: '#333333' }));
-      btn.on('pointerdown', onClick);
-      return btn;
+      }).setOrigin(0.5);
+      label.setShadow(0, 2, '#000000', 2, true, true);
+
+      // Compute box size from label with padding
+      const paddingX = 22;
+      const paddingY = 12;
+      const w = Math.ceil(label.width + paddingX * 2);
+      const h = Math.ceil(label.height + paddingY * 2);
+      const radius = 12; // slightly more rounded edges
+
+      // Rounded rect background with border
+      const box = this.add.graphics();
+      const draw = (mode = 'normal') => {
+        box.clear();
+        let fill = 0x333333;
+        let fillA = 0.95;
+        let stroke = 0xffffff;
+        let strokeA = 0.28;
+        if (mode === 'hover') { fill = 0x4a4a4a; strokeA = 0.35; }
+        if (mode === 'down')  { fill = 0x2f2f2f; strokeA = 0.40; }
+        box.fillStyle(fill, fillA);
+        box.fillRoundedRect(-w / 2, -h / 2, w, h, radius);
+        box.lineStyle(2, stroke, strokeA);
+        box.strokeRoundedRect(-w / 2 + 0.5, -h / 2 + 0.5, w - 1, h - 1, radius);
+      };
+      draw('normal');
+
+      container.add([box, label]);
+      container.setSize(w, h);
+      container.setInteractive({ useHandCursor: true });
+
+      // Hover/press effects + click
+      container.on('pointerover', () => draw('hover'));
+      container.on('pointerout', () => draw('normal'));
+      container.on('pointerdown', () => draw('down'));
+      container.on('pointerup', () => {
+        draw('hover');
+        onClick();
+      });
+
+      return container;
     };
 
-    const spacing = 80;
-    const startY = this.worldHeight / 2 - spacing;
+    // Slightly increase spacing and add extra gap below the title
+    const spacing = 88;
+    const startY = this.worldHeight / 2 - spacing + 24;
     const btns = [];
     for (let i = 0; i < this.upgradeChoices.length; i++) {
       const up = this.upgradeChoices[i];
