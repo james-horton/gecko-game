@@ -83,6 +83,10 @@ class GameScene extends Phaser.Scene {
     this.shelterHealthText = null;
     this.shelterDamageInterval = 450; // ms between damage ticks per enemy
     this.isGameOver = false;
+
+    // Debug: facing diagnostics
+    this.debugFacing = true;
+    this._nextFacingLogAt = 0;
   }
 
   preload() {
@@ -847,6 +851,71 @@ class GameScene extends Phaser.Scene {
         }
       }
     }
+
+    // Debug: facing/backpedal diagnostics
+    this.debugFacingTick(now);
+  }
+
+  // Debug helper: logs when an enemy is moving opposite its facing or when wasps backpedal
+  debugFacingTick(now) {
+    if (!this.debugFacing || !this.enemies) return;
+    if (now < (this._nextFacingLogAt || 0)) return;
+    this._nextFacingLogAt = now + 1000; // throttle to 1 Hz
+
+    const ecs = this.enemies.getChildren();
+    let samples = 0;
+    for (let i = 0; i < ecs.length; i++) {
+      const e = ecs[i];
+      if (!e || !e.active || !e.body) continue;
+      const type = e.getData && e.getData('type');
+
+      const v = e.body.velocity || { x: 0, y: 0 };
+      const vlen = Math.hypot(v.x, v.y);
+      if (vlen < 5) continue; // ignore near-zero movement
+
+      const fwd = { x: Math.cos(e.rotation || 0), y: Math.sin(e.rotation || 0) };
+      const vnorm = { x: v.x / vlen, y: v.y / vlen };
+      const dotFV = fwd.x * vnorm.x + fwd.y * vnorm.y;
+
+      // Target-based backpedal detection (for wasps hovering)
+      let dist = null;
+      let backpedal = false;
+      if ((type === 'enemy_wasp' || type === 'enemy_fly') && this.player) {
+        const pc = this.player.getCenter();
+        const epos = e.getCenter();
+        const dx = pc.x - epos.x, dy = pc.y - epos.y;
+        dist = Math.hypot(dx, dy);
+        if (type === 'enemy_wasp') {
+          const desired = 200; // same as AI target distance
+          if (dist > 0.0001) {
+            const dir = { x: dx / dist, y: dy / dist };
+            const dotDV = dir.x * vnorm.x + dir.y * vnorm.y;
+            backpedal = dist < desired * 0.75 && dotDV < -0.1;
+          }
+        }
+      } else if ((type === 'enemy_beetle' || type === 'enemy_caterpillar') && this.shelter) {
+        const epos = e.getCenter();
+        const dx = this.shelter.x - epos.x, dy = this.shelter.y - epos.y;
+        dist = Math.hypot(dx, dy);
+      }
+
+      if (backpedal || dotFV < -0.1) {
+        try {
+          console.debug('[Diag] Enemy facing vs velocity', {
+            type,
+            pos: { x: Math.round(e.x), y: Math.round(e.y) },
+            rotDeg: Math.round((e.rotation || 0) * 180 / Math.PI),
+            v: { x: Math.round(v.x), y: Math.round(v.y) },
+            faceVsMoveDot: Math.round(dotFV * 100) / 100,
+            waspBackpedal: !!backpedal,
+            dist: dist != null ? Math.round(dist) : null
+          });
+        } catch (err) {}
+      }
+
+      samples++;
+      if (samples >= 5) break; // cap per tick
+    }
   }
 
   performTongueAttack() {
@@ -1076,7 +1145,7 @@ class GameScene extends Phaser.Scene {
     }
 
     // Face the player
-    enemy.setRotation(Math.atan2(dir.y, dir.x));
+    enemy.setRotation(Math.atan2(dir.y, dir.x) + Math.PI);
 
     // Firing
     const nextAt = enemy.getData('nextShotAt') || 0;
@@ -1125,7 +1194,7 @@ class GameScene extends Phaser.Scene {
     if (dist > 0.0001) dir.normalize();
     const speed = enemy.getData('speed') || 100;
     enemy.setVelocity(dir.x * speed, dir.y * speed);
-    enemy.setRotation(Math.atan2(dir.y, dir.x));
+    enemy.setRotation(Math.atan2(dir.y, dir.x) + Math.PI);
   }
 
   updateTankAI(enemy, now) {
@@ -1138,7 +1207,7 @@ class GameScene extends Phaser.Scene {
     if (dist > 0.0001) dir.normalize();
     const base = enemy.getData('speed') || 40;
     enemy.setVelocity(dir.x * base, dir.y * base);
-    enemy.setRotation(Math.atan2(dir.y, dir.x));
+    enemy.setRotation(Math.atan2(dir.y, dir.x) + Math.PI);
   }
 
   onShelterEnemyOverlap(shelter, enemy) {
