@@ -85,6 +85,17 @@ class GameScene extends Phaser.Scene {
     this.shelterHealthGfx = null;
     this.shelterHealthText = null;
     this.shelterDamageInterval = 450; // ms between damage ticks per enemy
+    // Shelter progression + turret defense
+    this.shelterLevel = 1;
+    this.maxShelterLevel = 3;
+    this.shelterHasTurret = false;
+    this.shelterUpgradeHealthBoost = 8;
+    this.allyProjectiles = null;
+    this.shelterRange = 260;
+    this.shelterShootCooldown = 1200;
+    this.nextShelterShotAt = 0;
+    this.shelterProjectileSpeed = 340;
+    this.shelterProjectileDamage = 1;
     this.isGameOver = false;
 
     // Debug: facing diagnostics
@@ -176,6 +187,61 @@ class GameScene extends Phaser.Scene {
       s.strokeRoundedRect(8, 22, 48, 24, 4);
       s.generateTexture('shelter_home', 64, 48);
       s.destroy();
+    }
+
+    // Shelter (level 2) fortified texture with roof turret
+    {
+      const s2 = this.make.graphics({ x: 0, y: 0, add: false });
+      // Roof (reinforced)
+      s2.fillStyle(0x2b2f33, 1);
+      s2.fillTriangle(4, 22, 60, 22, 32, 4);
+      // Walls (base)
+      s2.fillStyle(0x6b4f2e, 1);
+      s2.fillRoundedRect(8, 22, 48, 24, 4);
+      // Metal plating strip
+      s2.fillStyle(0xaab7c4, 0.85);
+      s2.fillRoundedRect(10, 24, 44, 10, 3);
+      // Door
+      s2.fillStyle(0x0a0a0a, 1);
+      s2.fillRoundedRect(32 - 6, 28, 12, 16, 2);
+      // Turret block and barrel
+      s2.fillStyle(0xaab7c4, 1);
+      s2.fillRoundedRect(28, 10, 8, 6, 2);
+      s2.fillStyle(0x88e0ff, 1);
+      s2.fillRect(36, 12, 12, 2);
+      // Outlines
+      s2.lineStyle(2, 0x000000, 0.28);
+      s2.strokeTriangle(4, 22, 60, 22, 32, 4);
+      s2.strokeRoundedRect(8, 22, 48, 24, 4);
+      s2.generateTexture('shelter_home_lv2', 64, 48);
+      s2.destroy();
+    }
+
+    // Ally projectile (turret bolt)
+    {
+      const ap = this.make.graphics({ x: 0, y: 0, add: false });
+      ap.fillStyle(0xb0ecff, 1);
+      ap.fillTriangle(2, 6, 6, 2, 10, 6);
+      ap.fillTriangle(6, 10, 2, 6, 10, 6);
+      ap.lineStyle(1, 0x2b4f5f, 1);
+      ap.strokeTriangle(2, 6, 6, 2, 10, 6);
+      ap.strokeTriangle(6, 10, 2, 6, 10, 6);
+      ap.generateTexture('shelter_projectile', 12, 12);
+      ap.destroy();
+    }
+
+    // Upgrade glow pulse texture
+    {
+      const ug = this.make.graphics({ x: 0, y: 0, add: false });
+      const cx = 32, cy = 32;
+      ug.fillStyle(0x88e0ff, 0.22);
+      ug.fillCircle(cx, cy, 28);
+      ug.fillStyle(0x88e0ff, 0.14);
+      ug.fillCircle(cx, cy, 20);
+      ug.fillStyle(0xffffff, 0.12);
+      ug.fillCircle(cx, cy, 12);
+      ug.generateTexture('upgrade_glow', 64, 64);
+      ug.destroy();
     }
 
     // Chameleon sprite: coiled tail, casque crest, stripe bands, turret eye
@@ -579,6 +645,16 @@ class GameScene extends Phaser.Scene {
     // Shelter baseline
     this.shelterMaxHealth = 20;
     this.shelterHealth = this.shelterMaxHealth;
+    this.shelterLevel = 1;
+    this.maxShelterLevel = 3;
+    this.shelterHasTurret = false;
+    this.shelterUpgradeHealthBoost = 8;
+    // Turret baseline stats (become active at level >= 2)
+    this.shelterRange = 260;
+    this.shelterShootCooldown = 1200;
+    this.nextShelterShotAt = 0;
+    this.shelterProjectileSpeed = 340;
+    this.shelterProjectileDamage = 1;
     this.isGameOver = false;
 
     // Clear transient refs
@@ -715,6 +791,10 @@ class GameScene extends Phaser.Scene {
     // Projectiles (enemy shots)
     this.projectiles = this.physics.add.group({ allowGravity: false });
     this.physics.add.overlap(this.player, this.projectiles, this.onPlayerProjectileOverlap, null, this);
+    
+    // Ally projectiles (shelter defense)
+    this.allyProjectiles = this.physics.add.group({ allowGravity: false });
+    this.physics.add.overlap(this.enemies, this.allyProjectiles, this.onEnemyHitByAllyProjectile, null, this);
     
     // Hearts
     this.hearts = this.physics.add.group({ allowGravity: false, immovable: true });
@@ -856,6 +936,11 @@ class GameScene extends Phaser.Scene {
           this.updateTankAI(e, now);
         }
       }
+    }
+
+    // Shelter turret defense
+    if (this.shelterHasTurret && this.shelter && this.enemies && !this.isChoosingUpgrade && !this.isGameOver) {
+      this.updateShelterDefense(now);
     }
 
     // Debug: facing/backpedal diagnostics
@@ -1194,6 +1279,166 @@ class GameScene extends Phaser.Scene {
     return proj;
   }
 
+  // Ally projectile spawn (shelter turret)
+  spawnAllyProjectile(x, y, dir) {
+    if (!this.allyProjectiles) return null;
+    const proj = this.allyProjectiles.create(x, y, 'shelter_projectile');
+    proj.setDepth(6);
+    const ang = Math.atan2(dir.y, dir.x);
+    proj.setRotation(ang);
+    if (proj.setAngle) proj.setAngle(Phaser.Math.RadToDeg(ang));
+    if (proj.body) {
+      proj.body.setAllowGravity(false);
+      proj.setCollideWorldBounds(true);
+      proj.body.onWorldBounds = true;
+      if (proj.body.setCircle) {
+        const r = Math.floor(Math.min(proj.width, proj.height) * 0.38);
+        const ox = proj.width / 2 - r;
+        const oy = proj.height / 2 - r;
+        proj.body.setCircle(r, ox, oy);
+      }
+    }
+    const spd = this.shelterProjectileSpeed || 320;
+    proj.setVelocity(dir.x * spd, dir.y * spd);
+    return proj;
+  }
+
+  updateShelterDefense(now) {
+    if (!this.shelter || !this.enemies || this.isChoosingUpgrade || this.isGameOver) return;
+    if (!this.shelterHasTurret) return;
+    if (now < (this.nextShelterShotAt || 0)) return;
+
+    const sx = this.shelter.x;
+    const sy = this.shelter.y;
+    const range = this.shelterRange || 240;
+
+    // Find closest enemy within range
+    const cs = this.enemies.getChildren ? this.enemies.getChildren() : [];
+    let target = null;
+    let bestD2 = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < cs.length; i++) {
+      const e = cs[i];
+      if (!e || !e.active) continue;
+      const ec = e.getCenter();
+      const dx = ec.x - sx;
+      const dy = ec.y - sy;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestD2 && d2 <= range * range) {
+        bestD2 = d2;
+        target = e;
+      }
+    }
+    if (!target) return;
+
+    const tc = target.getCenter();
+    const spawnOffset = new Phaser.Math.Vector2(0, -12); // above roof
+    const startX = sx + spawnOffset.x;
+    const startY = sy + spawnOffset.y;
+    const dir = new Phaser.Math.Vector2(tc.x - startX, tc.y - startY);
+    if (dir.lengthSq() === 0) return;
+    dir.normalize();
+
+    this.spawnAllyProjectile(startX, startY, dir);
+    this.nextShelterShotAt = now + (this.shelterShootCooldown || 1000);
+
+    // Muzzle flash
+    const flash = this.add.graphics();
+    flash.setDepth(7);
+    flash.fillStyle(0xb0ecff, 0.85);
+    flash.fillCircle(startX, startY, 4);
+    this.tweens.add({
+      targets: flash,
+      alpha: 0,
+      scaleX: 1.6,
+      scaleY: 1.6,
+      duration: 120,
+      ease: 'Quad.easeOut',
+      onComplete: () => flash.destroy()
+    });
+
+    if (this.sfxOn) this.sfxShelterShot();
+  }
+
+  onEnemyHitByAllyProjectile(enemy, proj) {
+    if (!enemy || !enemy.active || !proj || !proj.active) return;
+    this.hitEmitter.explode(Phaser.Math.Between(4, 6), enemy.x, enemy.y);
+    proj.destroy();
+    this.damageEnemy(enemy, this.shelterProjectileDamage || 1);
+  }
+
+  handleShelterUpgrade(up) {
+    // Level up
+    this.shelterLevel = Math.min(this.maxShelterLevel || 3, (this.shelterLevel || 1) + 1);
+
+    // Health boost and full repair
+    const boost = up && up.healthBoost != null ? up.healthBoost : (this.shelterUpgradeHealthBoost || 8);
+    this.shelterMaxHealth += boost;
+    this.shelterHealth = this.shelterMaxHealth;
+    this.updateShelterUI();
+
+    // Activate turret from level 2 onward and scale a bit with higher levels
+    if (this.shelterLevel >= 2) {
+      this.shelterHasTurret = true;
+      const extra = this.shelterLevel - 1;
+      this.shelterRange = (this.shelterRange || 260) + Math.max(0, extra - 1) * 20;
+      this.shelterShootCooldown = Math.max(500, (this.shelterShootCooldown || 1200) - extra * 120);
+      if (this.shelterLevel >= 3) {
+        this.shelterProjectileDamage = Math.min(5, (this.shelterProjectileDamage || 1) + 1);
+      }
+      this.nextShelterShotAt = 0;
+    }
+
+    // Swap to fortified visual
+    if (this.shelter && this.shelter.texture && this.shelter.texture.key !== 'shelter_home_lv2') {
+      this.shelter.setTexture('shelter_home_lv2');
+    }
+
+    // Visual celebration
+    this.animateShelterUpgrade();
+
+    // Floating text
+    const label = this.add.text(this.shelter.x, this.shelter.y - 30, 'Shelter Upgraded!', {
+      fontFamily: 'monospace',
+      fontSize: '18px',
+      color: '#eaffff'
+    }).setOrigin(0.5).setDepth(33);
+    label.setStroke('#002b36', 4);
+    label.setShadow(0, 2, '#000000', 2, true, true);
+    this.tweens.add({
+      targets: label,
+      y: label.y - 24,
+      alpha: 0,
+      duration: 900,
+      ease: 'Quad.easeOut',
+      onComplete: () => label.destroy()
+    });
+  }
+
+  animateShelterUpgrade() {
+    if (!this.shelter) return;
+
+    // Glow pulse under shelter
+    const glow = this.add.image(this.shelter.x, this.shelter.y, 'upgrade_glow').setDepth(2).setAlpha(0.6).setScale(0.6);
+    this.tweens.add({
+      targets: glow,
+      alpha: 0,
+      scale: 1.8,
+      duration: 420,
+      ease: 'Quad.easeOut',
+      onComplete: () => glow.destroy()
+    });
+
+    // Shelter pop
+    this.tweens.add({
+      targets: this.shelter,
+      scale: { from: 1.0, to: 1.08 },
+      yoyo: true,
+      repeat: 1,
+      duration: 200,
+      ease: 'Quad.easeOut'
+    });
+  }
+ 
   updateFlyAI(enemy, now) {
     if (!this.player || !enemy || !enemy.body) return;
     const p = this.player.getCenter();
@@ -1604,7 +1849,7 @@ class GameScene extends Phaser.Scene {
     const go = body.gameObject;
 
     // Destroy projectiles when they hit world bounds
-    if (this.projectiles && this.projectiles.contains(go)) {
+    if ((this.projectiles && this.projectiles.contains(go)) || (this.allyProjectiles && this.allyProjectiles.contains(go))) {
       go.destroy();
       return;
     }
@@ -1717,6 +1962,12 @@ class GameScene extends Phaser.Scene {
       { type: 'tongue', value: 80, description: 'Longer Tongue\n+80 range' },
       { type: 'attack', value: 0.25, description: 'Faster Attacks\n-25% cooldown' }
     ];
+    // Offer shelter upgrade if not at max level
+    if ((this.shelterLevel || 1) < (this.maxShelterLevel || 3)) {
+      const boost = this.shelterUpgradeHealthBoost || 8;
+      const desc = 'Upgrade Shelter';
+      all.push({ type: 'shelter_upgrade', healthBoost: boost, description: desc });
+    }
     // Shuffle
     for (let i = all.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -1737,6 +1988,9 @@ class GameScene extends Phaser.Scene {
         break;
       case 'attack':
         this.attackCooldown = Math.max(80, Math.floor(this.attackCooldown * (1 - up.value)));
+        break;
+      case 'shelter_upgrade':
+        this.handleShelterUpgrade(up);
         break;
     }
 
@@ -1875,6 +2129,13 @@ class GameScene extends Phaser.Scene {
     const base = 800 + Phaser.Math.Between(-40, 40);
     this.playTone({ type: 'triangle', startFreq: base, endFreq: 600, duration: 0.08, attack: 0.001, volume: 0.10 });
     this.playTone({ type: 'square', startFreq: base * 0.9, endFreq: 500, duration: 0.06, attack: 0.001, volume: 0.06, delay: 0.01 });
+  }
+
+  sfxShelterShot() {
+    // Bright short zap for turret
+    const base = 720 + Phaser.Math.Between(-30, 30);
+    this.playTone({ type: 'square', startFreq: base, endFreq: base + 220, duration: 0.06, attack: 0.001, volume: 0.10 });
+    this.playTone({ type: 'triangle', startFreq: base + 220, endFreq: base + 120, duration: 0.05, attack: 0.001, volume: 0.06, delay: 0.02 });
   }
  
   sfxHit() {
