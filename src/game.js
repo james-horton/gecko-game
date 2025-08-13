@@ -74,6 +74,15 @@ class GameScene extends Phaser.Scene {
     this.shadow = null;
     this.hitParticles = null;
     this.hitEmitter = null;
+
+    // Shelter/Home Base
+    this.shelter = null;
+    this.shelterMaxHealth = 20;
+    this.shelterHealth = this.shelterMaxHealth;
+    this.shelterHealthGfx = null;
+    this.shelterHealthText = null;
+    this.shelterDamageInterval = 450; // ms between damage ticks per enemy
+    this.isGameOver = false;
   }
 
   preload() {
@@ -140,6 +149,26 @@ class GameScene extends Phaser.Scene {
       sh.fillEllipse(32, 16, 64, 24);
       sh.generateTexture('shadow_oval', 64, 32);
       sh.destroy();
+    }
+
+    // Shelter (home base) texture
+    {
+      const s = this.make.graphics({ x: 0, y: 0, add: false });
+      // Roof
+      s.fillStyle(0x2d2b2a, 1);
+      s.fillTriangle(4, 22, 60, 22, 32, 6);
+      // Walls
+      s.fillStyle(0x6b4f2e, 1);
+      s.fillRoundedRect(8, 22, 48, 24, 4);
+      // Door
+      s.fillStyle(0x1b1b1b, 1);
+      s.fillRoundedRect(32 - 6, 28, 12, 16, 2);
+      // Outlines
+      s.lineStyle(2, 0x000000, 0.25);
+      s.strokeTriangle(4, 22, 60, 22, 32, 6);
+      s.strokeRoundedRect(8, 22, 48, 24, 4);
+      s.generateTexture('shelter_home', 64, 48);
+      s.destroy();
     }
 
     // Chameleon sprite: coiled tail, casque crest, stripe bands, turret eye
@@ -539,10 +568,20 @@ class GameScene extends Phaser.Scene {
     this.lastDirection = new Phaser.Math.Vector2(1, 0);
     this.sprayUses = 0;
 
+    // Shelter baseline
+    this.shelterMaxHealth = 20;
+    this.shelterHealth = this.shelterMaxHealth;
+    this.isGameOver = false;
+
     // Clear transient refs
     this.tongue = null;
     this.tongueTip = null;
     this.upgradeUI = [];
+
+    // Shelter refs
+    this.shelter = null;
+    this.shelterHealthGfx = null;
+    this.shelterHealthText = null;
 
     console.info('[Scene] init() reset', {
       before,
@@ -584,6 +623,10 @@ class GameScene extends Phaser.Scene {
         img.setAlpha(Phaser.Math.FloatBetween(0.9, 1));
       }
     }
+
+    // Shelter (home base) - static
+    this.shelter = this.physics.add.staticImage(120, this.worldHeight - 100, 'shelter_home');
+    this.shelter.setDepth(3);
 
     // Player
     this.player = this.physics.add.sprite(this.worldWidth / 2, this.worldHeight / 2, 'chameleon');
@@ -652,6 +695,12 @@ class GameScene extends Phaser.Scene {
     for (let i = 0; i < 8; i++) {
       this.spawnEnemy();
     }
+    // Damage shelter when tanks overlap it
+    this.physics.add.overlap(this.shelter, this.enemies, this.onShelterEnemyOverlap, null, this);
+    this.physics.add.collider(this.enemies, this.shelter, null, (enemyObj, shelterObj) => {
+      const t = enemyObj && enemyObj.getData && enemyObj.getData('type');
+      return t === 'enemy_beetle' || t === 'enemy_caterpillar';
+    }, this);
     
     // Projectiles (enemy shots)
     this.projectiles = this.physics.add.group({ allowGravity: false });
@@ -688,6 +737,17 @@ class GameScene extends Phaser.Scene {
     this.healthText.setStroke('#000000', 3);
     this.healthText.setShadow(0, 2, '#000000', 2, true, true);
     this.updateHealthUI();
+
+    // Shelter UI
+    this.shelterHealthGfx = this.add.graphics().setDepth(20);
+    this.shelterHealthText = this.add.text(8, 100, 'Shelter: ' + this.shelterHealth + '/' + this.shelterMaxHealth, {
+      fontFamily: 'monospace',
+      fontSize: '16px',
+      color: '#ffffff'
+    }).setDepth(20);
+    this.shelterHealthText.setStroke('#000000', 3);
+    this.shelterHealthText.setShadow(0, 2, '#000000', 2, true, true);
+    this.updateShelterUI();
 
     // Damage flash overlay
     this.redFlash = this.add
@@ -771,14 +831,19 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    // Enemy AI (ranged behaviors)
-    if (this.enemies && !this.isDead && !this.isChoosingUpgrade) {
+    // Enemy AI (behaviors)
+    if (this.enemies && !this.isChoosingUpgrade && !this.isGameOver) {
       const ecs = this.enemies.getChildren();
       for (let i = 0; i < ecs.length; i++) {
         const e = ecs[i];
         if (!e || !e.active) continue;
-        if (e.getData('type') === 'enemy_wasp') {
+        const type = e.getData && e.getData('type');
+        if (type === 'enemy_wasp') {
           this.updateWaspAI(e, now);
+        } else if (type === 'enemy_fly') {
+          this.updateFlyAI(e, now);
+        } else if (type === 'enemy_beetle' || type === 'enemy_caterpillar') {
+          this.updateTankAI(e, now);
         }
       }
     }
@@ -1051,6 +1116,122 @@ class GameScene extends Phaser.Scene {
     return proj;
   }
 
+  updateFlyAI(enemy, now) {
+    if (!this.player || !enemy || !enemy.body) return;
+    const p = this.player.getCenter();
+    const epos = enemy.getCenter();
+    const dir = new Phaser.Math.Vector2(p.x - epos.x, p.y - epos.y);
+    const dist = dir.length();
+    if (dist > 0.0001) dir.normalize();
+    const speed = enemy.getData('speed') || 100;
+    enemy.setVelocity(dir.x * speed, dir.y * speed);
+    enemy.setRotation(Math.atan2(dir.y, dir.x));
+  }
+
+  updateTankAI(enemy, now) {
+    if (!this.shelter || !enemy || !enemy.body) return;
+    const sx = this.shelter.x;
+    const sy = this.shelter.y;
+    const epos = enemy.getCenter();
+    const dir = new Phaser.Math.Vector2(sx - epos.x, sy - epos.y);
+    const dist = dir.length();
+    if (dist > 0.0001) dir.normalize();
+    const base = enemy.getData('speed') || 40;
+    enemy.setVelocity(dir.x * base, dir.y * base);
+    enemy.setRotation(Math.atan2(dir.y, dir.x));
+  }
+
+  onShelterEnemyOverlap(shelter, enemy) {
+    if (!enemy || !enemy.active || this.isGameOver) return;
+    const t = enemy.getData && enemy.getData('type');
+    if (t !== 'enemy_beetle' && t !== 'enemy_caterpillar') return;
+    const now = this.time.now;
+    const next = enemy.getData('nextShelterDamageAt') || 0;
+    if (now < next) return;
+    enemy.setData('nextShelterDamageAt', now + this.shelterDamageInterval);
+    const dmg = enemy.getData('contactDamage') != null ? enemy.getData('contactDamage') : 1;
+    this.damageShelter(dmg, enemy);
+    // FX
+    if (this.hitEmitter) this.hitEmitter.explode(Phaser.Math.Between(4, 8), enemy.x, enemy.y);
+    this.cameras.main.shake(90, 0.003);
+  }
+
+  damageShelter(amount = 1, source = null) {
+    if (this.isGameOver) return;
+    this.shelterHealth = Math.max(0, this.shelterHealth - amount);
+    this.updateShelterUI();
+    if (this.sfxOn) this.sfxHurt();
+    if (this.shelterHealth <= 0) {
+      this.onShelterDestroyed();
+    }
+  }
+
+  onShelterDestroyed() {
+    if (this.isGameOver) return;
+    this.isGameOver = true;
+    this.isDead = true; // freeze inputs similar to player death
+    if (this.sfxOn) this.sfxDie();
+    this.physics.pause();
+
+    // Clear any active enemy projectiles
+    if (this.projectiles) this.projectiles.clear(true, true);
+
+    // Visual state
+    if (this.player) this.player.setTint(0x444444);
+    if (this.shelter) this.shelter.setTint(0x555555);
+
+    // Overlay UI
+    const overlay = this.add
+      .rectangle(this.worldWidth / 2, this.worldHeight / 2, this.worldWidth, this.worldHeight, 0x000000, 0.7)
+      .setDepth(40);
+    const title = this.add.text(this.worldWidth / 2, this.worldHeight / 2 - 20, 'Shelter Destroyed', {
+      fontFamily: 'monospace',
+      fontSize: '42px',
+      color: '#ffffff'
+    }).setOrigin(0.5).setDepth(41);
+    title.setShadow(0, 4, '#000000', 4, true, true);
+
+    const prompt = this.add.text(this.worldWidth / 2, this.worldHeight / 2 + 40, 'Press R to Restart', {
+      fontFamily: 'monospace',
+      fontSize: '20px',
+      color: '#ffffff'
+    }).setOrigin(0.5).setDepth(41);
+    prompt.setShadow(0, 2, '#000000', 2, true, true);
+
+    this.input.keyboard.once('keydown-R', () => this.scene.restart());
+    this.input.once('pointerdown', () => this.scene.restart());
+  }
+
+  updateShelterUI() {
+    if (!this.shelterHealthGfx) return;
+    const x = 8;
+    const y = 82;
+    const w = 140;
+    const h = 14;
+    const pct = Phaser.Math.Clamp(this.shelterHealth / this.shelterMaxHealth, 0, 1);
+
+    this.shelterHealthGfx.clear();
+    // Border/Backdrop
+    this.shelterHealthGfx.fillStyle(0x000000, 0.4);
+    this.shelterHealthGfx.fillRoundedRect(x - 3, y - 3, w + 6, h + 6, 8);
+    // Background
+    this.shelterHealthGfx.fillStyle(0x10212b, 0.95);
+    this.shelterHealthGfx.fillRoundedRect(x, y, w, h, 6);
+    // Fill color
+    const fillColor = pct > 0.5 ? 0x2e86c1 : (pct > 0.25 ? 0xf39c12 : 0xe74c3c);
+    this.shelterHealthGfx.fillStyle(fillColor, 1);
+    this.shelterHealthGfx.fillRoundedRect(x, y, Math.max(0, Math.floor(w * pct)), h, 6);
+    // Shine
+    if (pct > 0) {
+      this.shelterHealthGfx.fillStyle(0xffffff, 0.15);
+      this.shelterHealthGfx.fillRoundedRect(x + 4, y + 3, Math.max(0, Math.floor((w - 8) * pct)), 4, 3);
+    }
+
+    if (this.shelterHealthText) {
+      this.shelterHealthText.setText('Shelter: ' + this.shelterHealth + '/' + this.shelterMaxHealth);
+    }
+  }
+
   onPlayerProjectileOverlap(player, proj) {
     if (!proj || !proj.active || this.isDead) return;
     const now = this.time.now;
@@ -1115,10 +1296,12 @@ class GameScene extends Phaser.Scene {
     if (type === 'enemy_beetle') {
       contactDamage = 2;
       const sp = Phaser.Math.Between(40, 80);
+      enemy.setData('speed', sp);
       const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
       enemy.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp);
     } else if (type === 'enemy_fly') {
       const sp = Phaser.Math.Between(70, 120);
+      enemy.setData('speed', sp);
       const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
       enemy.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp);
       this.tweens.add({
@@ -1133,6 +1316,7 @@ class GameScene extends Phaser.Scene {
       hp = 3; // bigger, slower, tougher
       contactDamage = 2;
       const sp = Phaser.Math.Between(15, 35);
+      enemy.setData('speed', sp);
       const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
       enemy.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp);
       this.tweens.add({
@@ -1758,6 +1942,7 @@ class GameScene extends Phaser.Scene {
   onPlayerDeath() {
     if (this.isDead) return;
     this.isDead = true;
+    this.isGameOver = true;
 
     if (this.sfxOn) this.sfxDie();
     this.physics.pause();
