@@ -696,9 +696,11 @@ class GameScene extends Phaser.Scene {
 
     // Enemies
     this.enemies = this.physics.add.group();
-    for (let i = 0; i < 8; i++) {
-      this.spawnEnemy();
-    }
+    // Progressive difficulty: compute settings and seed initial enemies
+    this.recomputeDifficulty();
+    this.maintainSpawns();
+    // Keep population topped up over time
+    this.spawnTimer = this.time.addEvent({ delay: this.spawnCheckInterval || 800, loop: true, callback: this.maintainSpawns, callbackScope: this });
     // Damage shelter when tanks overlap it
     this.physics.add.overlap(this.shelter, this.enemies, this.onShelterEnemyOverlap, null, this);
     this.physics.add.collider(this.enemies, this.shelter, null, (enemyObj, shelterObj) => {
@@ -1114,9 +1116,8 @@ class GameScene extends Phaser.Scene {
     this.enemiesDefeated++;
     if (this.killsText) this.killsText.setText('Kills: ' + this.enemiesDefeated);
     // Unlock ranged enemies (wasps) after the very first kill
-    if (this.enemiesDefeated === 1) {
-      this.waspsUnlocked = true;
-    }
+    // Recompute difficulty based on new kill count
+    this.recomputeDifficulty();
 
     // Respawn after a short delay to keep pressure
     this.time.delayedCall(600, () => this.spawnEnemy());
@@ -1322,9 +1323,23 @@ class GameScene extends Phaser.Scene {
 
   spawnEnemy() {
     const margin = 40;
+    // Enforce max active enemies cap
+    let activeCount = 0;
+    if (this.enemies && this.enemies.getChildren) {
+      const cs = this.enemies.getChildren();
+      for (let i = 0; i < cs.length; i++) {
+        const c = cs[i];
+        if (c && c.active) activeCount++;
+      }
+    }
+    const cap = this.maxActiveEnemies != null ? this.maxActiveEnemies : 8;
+    if (activeCount >= cap) return null;
+
+    // Spawn position
     const x = Phaser.Math.Between(margin, this.worldWidth - margin);
     const y = Phaser.Math.Between(margin, this.worldHeight - margin);
-    // Determine allowed enemy types based on wasp unlock and cap
+
+    // Count wasps for cap and pick weighted type
     let waspCount = 0;
     if (this.enemies && this.enemies.getChildren) {
       const cs = this.enemies.getChildren();
@@ -1333,11 +1348,7 @@ class GameScene extends Phaser.Scene {
         if (c && c.active && c.getData && c.getData('type') === 'enemy_wasp') waspCount++;
       }
     }
-    const canSpawnWasp = this.waspsUnlocked && waspCount < this.maxActiveWasps;
-    const pool = canSpawnWasp
-      ? ['enemy_beetle', 'enemy_fly', 'enemy_wasp', 'enemy_caterpillar']
-      : ['enemy_beetle', 'enemy_fly', 'enemy_caterpillar'];
-    const type = pool[Phaser.Math.Between(0, pool.length - 1)];
+    const type = this.chooseEnemyType ? this.chooseEnemyType(waspCount) : 'enemy_fly';
     const enemy = this.enemies.create(x, y, type);
     enemy.setData('type', type);
     enemy.setCollideWorldBounds(true);
@@ -1364,12 +1375,14 @@ class GameScene extends Phaser.Scene {
 
     if (type === 'enemy_beetle') {
       contactDamage = 2;
-      const sp = Phaser.Math.Between(40, 80);
+      const baseSp = Phaser.Math.Between(40, 80);
+      const sp = Math.max(10, Math.floor(baseSp * (this.enemySpeedScale || 1)));
       enemy.setData('speed', sp);
       const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
       enemy.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp);
     } else if (type === 'enemy_fly') {
-      const sp = Phaser.Math.Between(70, 120);
+      const baseSp = Phaser.Math.Between(70, 120);
+      const sp = Math.max(10, Math.floor(baseSp * (this.enemySpeedScale || 1)));
       enemy.setData('speed', sp);
       const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
       enemy.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp);
@@ -1382,9 +1395,10 @@ class GameScene extends Phaser.Scene {
         ease: 'Sine.easeInOut'
       });
     } else if (type === 'enemy_caterpillar') {
-      hp = 3; // bigger, slower, tougher
+      hp = (this.caterpillarHp != null ? this.caterpillarHp : 3); // bigger, slower, tougher
       contactDamage = 2;
-      const sp = Phaser.Math.Between(15, 35);
+      const baseSp = Phaser.Math.Between(15, 35);
+      const sp = Math.max(8, Math.floor(baseSp * (this.enemySpeedScale || 1)));
       enemy.setData('speed', sp);
       const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
       enemy.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp);
@@ -2062,8 +2076,89 @@ class GameScene extends Phaser.Scene {
   sfxDie() {
     this.playTone({ type: 'triangle', startFreq: 220, endFreq: 60, duration: 0.40, attack: 0.002, volume: 0.14 });
   }
-}
+  // Progressive difficulty recomputation (kill-based)
+  recomputeDifficulty() {
+    const k = this.enemiesDefeated || 0;
+    const level = Math.floor(k / 6);
 
+    if (this.waspUnlockKills == null) this.waspUnlockKills = 12;
+    if (this.spawnCheckInterval == null) this.spawnCheckInterval = 800;
+
+    // Population cap: starts gentle and ramps up
+    this.maxActiveEnemies = Math.min(3 + level * 2, 18);
+    if (k < 4) this.maxActiveEnemies = 3;
+
+    // Unlock ranged enemies later
+    this.waspsUnlocked = k >= this.waspUnlockKills;
+
+    // Cap simultaneous wasps, ramp slowly
+    const extraWasp = this.waspsUnlocked ? Math.floor((k - this.waspUnlockKills) / 8) + 1 : 0;
+    this.maxActiveWasps = Math.max(0, Math.min(3, extraWasp));
+
+    // Global enemy speed scaling
+    this.enemySpeedScale = 0.9 + Math.min(0.4, level * 0.06); // 0.9 -> 1.3
+
+    // Tanky enemy HP
+    this.caterpillarHp = 3 + Math.max(0, Math.floor(level / 5)); // 3..5
+
+    // Shooter tuning
+    this.shooterMoveSpeed = 90 + Math.min(50, level * 6); // 90..140
+    this.shooterProjectileSpeed = 240 + Math.min(160, level * 10); // 240..400
+
+    const minCd = 1100 - level * 60;
+    const maxCd = 1800 - level * 80;
+    this.shooterMinCooldown = Math.max(600, Math.floor(minCd));
+    this.shooterMaxCooldown = Math.max(this.shooterMinCooldown + 200, Math.floor(maxCd));
+
+    // Shelter damage pacing: starts slower, narrows towards default
+    this.shelterDamageInterval = Math.max(400, 600 - level * 30);
+  }
+
+  // Keep active enemy population near the cap
+  maintainSpawns() {
+    if (!this.enemies || this.isGameOver || this.isChoosingUpgrade) return;
+    const cs = this.enemies.getChildren ? this.enemies.getChildren() : [];
+    let activeCount = 0;
+    for (let i = 0; i < cs.length; i++) {
+      const c = cs[i];
+      if (c && c.active) activeCount++;
+    }
+    const cap = this.maxActiveEnemies != null ? this.maxActiveEnemies : 8;
+    const need = Math.max(0, cap - activeCount);
+    for (let i = 0; i < need; i++) this.spawnEnemy();
+  }
+
+  // Weighted enemy selection that evolves with kills and respects wasp caps
+  chooseEnemyType(waspCount = 0) {
+    const k = this.enemiesDefeated || 0;
+    let weights;
+    if (k < 4) {
+      weights = { enemy_fly: 3, enemy_beetle: 0, enemy_caterpillar: 0, enemy_wasp: 0 };
+    } else if (k < 8) {
+      weights = { enemy_fly: 3, enemy_beetle: 1, enemy_caterpillar: 0, enemy_wasp: 0 };
+    } else if (k < 12) {
+      weights = { enemy_fly: 3, enemy_beetle: 2, enemy_caterpillar: 1, enemy_wasp: 0 };
+    } else if (k < 20) {
+      weights = { enemy_fly: 2, enemy_beetle: 2, enemy_caterpillar: 1, enemy_wasp: 1 };
+    } else if (k < 30) {
+      weights = { enemy_fly: 2, enemy_beetle: 3, enemy_caterpillar: 2, enemy_wasp: 2 };
+    } else {
+      weights = { enemy_fly: 2, enemy_beetle: 3, enemy_caterpillar: 3, enemy_wasp: 3 };
+    }
+
+    const canSpawnWasp = this.waspsUnlocked && waspCount < (this.maxActiveWasps || 0);
+    if (!canSpawnWasp) weights.enemy_wasp = 0;
+
+    const bag = [];
+    for (const [key, w] of Object.entries(weights)) {
+      for (let i = 0; i < w; i++) bag.push(key);
+    }
+    if (bag.length === 0) return 'enemy_fly';
+    const idx = Phaser.Math.Between(0, bag.length - 1);
+    return bag[idx];
+  }
+}
+ 
 // Game configuration and bootstrapping
 const config = {
   type: Phaser.AUTO,
