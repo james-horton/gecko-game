@@ -339,36 +339,72 @@ class GameScene extends Phaser.Scene {
       g1.destroy();
     }
 
-    // Enemies: beetle
+    // Enemies: beetle (gnarly staghorn variant; same red palette)
     {
       const eg = this.make.graphics({ x: 0, y: 0, add: false });
-      // Legs
-      eg.lineStyle(2, 0x3a0d0d, 1);
+      // Palette (unchanged reds)
+      const C_SHELL = 0x8c1d1d;
+      const C_HILITE = 0xb23333;
+      const C_HEAD = 0x4a1212;
+      const C_OUT = 0x3a0d0d;
+
+      // Legs - splayed and spiky for a gnarlier silhouette
+      eg.lineStyle(2, C_OUT, 1);
       eg.beginPath();
-      eg.moveTo(10, 24); eg.lineTo(2, 30);
-      eg.moveTo(16, 26); eg.lineTo(8, 32);
-      eg.moveTo(28, 26); eg.lineTo(36, 32);
-      eg.moveTo(22, 24); eg.lineTo(30, 30);
+      // Front pair (angled forward)
+      eg.moveTo(18, 10); eg.lineTo(10, 4);
+      eg.moveTo(18, 12); eg.lineTo(10, 8);
+      // Middle pair (wide stance)
+      eg.moveTo(22, 18); eg.lineTo(32, 10);
+      eg.moveTo(22, 20); eg.lineTo(32, 26);
+      // Rear pair (kicked back)
+      eg.moveTo(28, 22); eg.lineTo(36, 28);
+      eg.moveTo(26, 20); eg.lineTo(34, 30);
       eg.strokePath();
-      // Shell
-      eg.fillStyle(0x8c1d1d, 1);
-      eg.fillEllipse(20, 16, 36, 24);
-      // Highlight
-      eg.fillStyle(0xb23333, 1);
-      eg.fillEllipse(20, 12, 26, 14);
+
+      // Elytra (shell) - slightly longer and narrower
+      eg.fillStyle(C_SHELL, 1);
+      eg.fillEllipse(22, 16, 34, 22);
+
+      // Pronotum (neck plate) to emphasize stag profile
+      eg.fillStyle(C_SHELL, 1);
+      eg.fillRoundedRect(12, 10, 12, 12, 3);
+
       // Head
-      eg.fillStyle(0x4a1212, 1);
-      eg.fillCircle(8, 16, 7);
-      // Eyes
+      eg.fillStyle(C_HEAD, 1);
+      eg.fillCircle(8, 16, 6);
+
+      // Stag mandibles/horns - big twin prongs
+      eg.fillStyle(C_HEAD, 1);
+      // Upper horn
+      eg.fillTriangle(8, 16, 2, 8, 6, 12);
+      // Lower horn
+      eg.fillTriangle(8, 16, 2, 24, 6, 20);
+      // Horn tips
+      eg.fillTriangle(1, 8, 4, 8, 2, 6);
+      eg.fillTriangle(1, 24, 4, 24, 2, 26);
+
+      // Eye
       eg.fillStyle(0xffffff, 1);
-      eg.fillCircle(6, 14, 2);
-      eg.fillCircle(10, 14, 2);
+      eg.fillCircle(9, 13, 2);
       eg.fillStyle(0x000000, 1);
-      eg.fillCircle(6, 14, 1);
-      eg.fillCircle(10, 14, 1);
-      // Ridge
-      eg.lineStyle(1, 0x3a0d0d, 0.6);
-      eg.strokeEllipse(20, 16, 34, 22);
+      eg.fillCircle(9, 13, 1);
+
+      // Shell highlight and central seam/ridge
+      eg.fillStyle(C_HILITE, 1);
+      eg.fillEllipse(22, 12, 24, 12);
+
+      eg.lineStyle(1, C_OUT, 0.75);
+      // Central seam
+      eg.beginPath();
+      eg.moveTo(22, 6); eg.lineTo(22, 26);
+      eg.strokePath();
+      // Elytra rim
+      eg.strokeEllipse(22, 16, 32, 20);
+      // Pronotum outline
+      eg.lineStyle(1, C_OUT, 0.5);
+      eg.strokeRoundedRect(12, 10, 12, 12, 3);
+
       eg.generateTexture('enemy_beetle', 40, 32);
       eg.destroy();
     }
