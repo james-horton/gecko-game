@@ -2289,7 +2289,7 @@ class GameScene extends Phaser.Scene {
     }
     // Per-type stats and behavior
     let hp = 1;
-    let contactDamage = 1;
+    let contactDamage = (type === 'enemy_fly') ? 0.5 : 1;
 
     if (type === 'enemy_beetle') {
       contactDamage = 2;
