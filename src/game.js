@@ -16,7 +16,7 @@ class GameScene extends Phaser.Scene {
     this.shooterMaxCooldown = 1600; // ms
     // Wasp spawning control
     this.waspsUnlocked = false;     // locked until threshold
-    this.maxActiveWasps = 3;        // cap simultaneous wasps
+    this.maxActiveWasps = 5;        // cap simultaneous wasps
     // Spawn gating
     this.postKillSpawnDelayMs = 1500;
     this.nextAllowedSpawnAt = 0;
@@ -71,6 +71,13 @@ class GameScene extends Phaser.Scene {
     this.healthGfx = null;
     this.healthText = null;
     this.redFlash = null;
+    // Hearts UI
+    this.healthHeartsContainer = null;
+    this.healthHeartSlots = [];
+    this.heartTexW = 0;
+    this.heartTexH = 0;
+    this.heartScale = 0.6;
+    this.heartSpacing = 4;
 
     // Visual polish
     this.bg = null;
@@ -763,6 +770,11 @@ class GameScene extends Phaser.Scene {
     this.tongue = null;
     this.tongueTip = null;
     this.upgradeUI = [];
+    // Reset hearts UI refs
+    this.healthHeartsContainer = null;
+    this.healthHeartSlots = [];
+    this.heartTexW = 0;
+    this.heartTexH = 0;
 
     // Shelter refs
     this.shelter = null;
@@ -930,21 +942,17 @@ class GameScene extends Phaser.Scene {
     }).setDepth(20);
     this.killsText.setStroke('#000000', 3);
     this.killsText.setShadow(0, 2, '#000000', 2, true, true);
+    // Move kills to top-right
+    this.killsText.setOrigin(1, 0);
+    this.killsText.setPosition(this.worldWidth - 8, 8);
 
-    // Health UI
-    this.healthGfx = this.add.graphics().setDepth(20);
-    this.healthText = this.add.text(8, 56, 'HP: ' + this.health + '/' + this.maxHealth, {
-      fontFamily: 'monospace',
-      fontSize: '16px',
-      color: '#ffffff'
-    }).setDepth(20);
-    this.healthText.setStroke('#000000', 3);
-    this.healthText.setShadow(0, 2, '#000000', 2, true, true);
+    // Health UI: Zelda-style hearts at top-left (where Kills used to be)
+    this.healthHeartsContainer = this.add.container(8, 8).setDepth(20);
     this.updateHealthUI();
 
     // Shelter UI
     this.shelterHealthGfx = this.add.graphics().setDepth(20);
-    this.shelterHealthText = this.add.text(8, 100, 'Shelter: ' + this.shelterHealth + '/' + this.shelterMaxHealth, {
+    this.shelterHealthText = this.add.text(8, 32, 'Shelter: ' + this.shelterHealth + '/' + this.shelterMaxHealth, {
       fontFamily: 'monospace',
       fontSize: '16px',
       color: '#ffffff'
@@ -1756,7 +1764,7 @@ class GameScene extends Phaser.Scene {
   updateShelterUI() {
     if (!this.shelterHealthGfx) return;
     const x = 8;
-    const y = 82;
+    const y = 58;
     const w = 140;
     const h = 14;
     const pct = Phaser.Math.Clamp(this.shelterHealth / this.shelterMaxHealth, 0, 1);
@@ -1894,18 +1902,16 @@ class GameScene extends Phaser.Scene {
         ease: 'Sine.easeInOut'
       });
     } else if (type === 'enemy_ant') {
-      // fast chaser that targets the player; slightly slower than chameleon
+      // fast chaser that targets the player; keep speed independent of player upgrades
       hp = 1;
       contactDamage = 0.5;
       const baseSp = Phaser.Math.Between(180, 200);
-      let sp = Math.max(10, Math.floor(baseSp * (this.enemySpeedScale || 1)));
-      // ensure ant stays just below player speed, even with upgrades
-      if (this.speed && Number.isFinite(this.speed)) {
-        sp = Math.min(sp, Math.max(30, this.speed - 10));
-      }
-      enemy.setData('speed', sp);
+      const sp = Math.max(10, baseSp); // do not scale with enemySpeedScale
+      const maxAntSpeed = 210; // stay a bit below baseline player speed (220) regardless of upgrades
+      const finalSp = Math.min(sp, maxAntSpeed);
+      enemy.setData('speed', finalSp);
       const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
-      enemy.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp);
+      enemy.setVelocity(Math.cos(ang) * finalSp, Math.sin(ang) * finalSp);
       this.tweens.add({
         targets: enemy,
         scale: { from: 0.98, to: 1.04 },
@@ -2407,34 +2413,75 @@ class GameScene extends Phaser.Scene {
     this.playTone({ type: 'sine', startFreq: 1000, endFreq: 1400, duration: 0.08, attack: 0.001, volume: 0.06, delay: 0.02 });
   }
   
-  // Health bar and text
+  // Hearts UI (Zelda-style)
   updateHealthUI() {
-    if (!this.healthGfx) return;
-    const x = 8;
-    const y = 38;
-    const w = 140;
-    const h = 14;
-    const pct = Phaser.Math.Clamp(this.health / this.maxHealth, 0, 1);
-
-    this.healthGfx.clear();
-    // Border/Backdrop
-    this.healthGfx.fillStyle(0x000000, 0.4);
-    this.healthGfx.fillRoundedRect(x - 3, y - 3, w + 6, h + 6, 8);
-    // Background
-    this.healthGfx.fillStyle(0x2b0d0d, 0.95);
-    this.healthGfx.fillRoundedRect(x, y, w, h, 6);
-    // Fill
-    const fillColor = pct > 0.5 ? 0x27ae60 : (pct > 0.25 ? 0xf39c12 : 0xe74c3c);
-    this.healthGfx.fillStyle(fillColor, 1);
-    this.healthGfx.fillRoundedRect(x, y, Math.max(0, Math.floor(w * pct)), h, 6);
-    // Shine
-    if (pct > 0) {
-      this.healthGfx.fillStyle(0xffffff, 0.15);
-      this.healthGfx.fillRoundedRect(x + 4, y + 3, Math.max(0, Math.floor((w - 8) * pct)), 4, 3);
+    // Initialize container if needed
+    if (!this.healthHeartsContainer) {
+      this.healthHeartsContainer = this.add.container(8, 8).setDepth(20);
     }
 
-    if (this.healthText) {
-      this.healthText.setText('HP: ' + this.health + '/' + this.maxHealth);
+    // Resolve texture dimensions once
+    if (!this.heartTexW || !this.heartTexH) {
+      const timg = this.add.image(0, 0, 'heart_pickup').setVisible(false);
+      this.heartTexW = timg.width;
+      this.heartTexH = timg.height;
+      timg.destroy();
+    }
+
+    const slotsNeeded = Math.max(0, Math.floor(this.maxHealth || 0));
+
+    if (!this.healthHeartSlots) this.healthHeartSlots = [];
+
+    // Rebuild slots if maxHealth changed
+    if (this.healthHeartSlots.length !== slotsNeeded) {
+      // Destroy old
+      for (const s of this.healthHeartSlots) {
+        if (s && s.bg && s.bg.destroy) s.bg.destroy();
+        if (s && s.fg && s.fg.destroy) s.fg.destroy();
+      }
+      this.healthHeartSlots = [];
+
+      const step = Math.round(this.heartTexW * (this.heartScale || 0.6)) + (this.heartSpacing || 4);
+      for (let i = 0; i < slotsNeeded; i++) {
+        const x = i * step;
+        const bg = this.add.image(x, 0, 'heart_pickup')
+          .setOrigin(0, 0)
+          .setScale(this.heartScale || 0.6)
+          .setTint(0x444444)
+          .setAlpha(0.45);
+        const fg = this.add.image(x, 0, 'heart_pickup')
+          .setOrigin(0, 0)
+          .setScale(this.heartScale || 0.6);
+        this.healthHeartsContainer.add(bg);
+        this.healthHeartsContainer.add(fg);
+        this.healthHeartSlots.push({ bg, fg });
+      }
+    }
+
+    // Update fill levels
+    const hp = Math.max(0, this.health || 0);
+    const fullW = this.heartTexW;
+    const fullH = this.heartTexH;
+
+    for (let i = 0; i < this.healthHeartSlots.length; i++) {
+      const { fg } = this.healthHeartSlots[i];
+      const heartIndex = i + 1; // 1-based
+      if (hp >= heartIndex) {
+        // full
+        if (fg.setCrop) fg.setCrop(0, 0, fullW, fullH);
+        fg.setVisible(true);
+        fg.clearTint();
+        fg.setAlpha(1);
+      } else if (hp >= heartIndex - 0.5) {
+        // half (left half)
+        if (fg.setCrop) fg.setCrop(0, 0, Math.ceil(fullW / 2), fullH);
+        fg.setVisible(true);
+        fg.clearTint();
+        fg.setAlpha(1);
+      } else {
+        // empty: hide foreground; background remains grey
+        fg.setVisible(false);
+      }
     }
   }
 
@@ -2449,17 +2496,44 @@ class GameScene extends Phaser.Scene {
     }
   }
   
-  // Enemy contact damage
+  // Enemy contact interactions
   onPlayerEnemyOverlap(player, enemy) {
     if (!enemy || !enemy.active || this.isDead) return;
 
+    const type = enemy.getData && enemy.getData('type');
+
+    // Ants deal 0.5 damage on contact and die instantly
+    if (type === 'enemy_ant') {
+      const now = this.time.now;
+      try {
+        console.info('[HIT] ant contact -> 0.5 dmg + instant kill', {
+          type,
+          intendedDamage: 0.5,
+          hasArmor: this.hasArmor,
+          health: this.health,
+          now,
+          invulnUntil: this.invulnUntil,
+          invulnActive: now < this.invulnUntil
+        });
+      } catch (e) {}
+
+      // Apply player damage first (respects invulnerability/armor), then kill the ant
+      this.takeDamage(0.5, enemy);
+
+      // FX and kill
+      if (this.hitEmitter) this.hitEmitter.explode(Phaser.Math.Between(8, 12), enemy.x, enemy.y);
+      if (this.sfxOn) this.sfxHit();
+      this.damageEnemy(enemy, 9999);
+      return;
+    }
+
     const dmg = enemy.getData('contactDamage') != null
       ? enemy.getData('contactDamage')
-      : (enemy.getData('type') === 'enemy_beetle' ? 2 : 1);
+      : (type === 'enemy_beetle' ? 2 : 1);
     const now = this.time.now;
     try {
       console.info('[HIT] enemy overlap', {
-        type: enemy.getData && enemy.getData('type'),
+        type,
         contactDamage: dmg,
         hasArmor: this.hasArmor,
         health: this.health,
