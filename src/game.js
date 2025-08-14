@@ -1,3 +1,840 @@
+function generateTextures(scene) {
+  // Skip if already generated
+  if (scene.textures && scene.textures.exists('ground_tile')) {
+    return;
+  }
+
+  // Ground tile
+  {
+    const g = scene.make.graphics({ x: 0, y: 0, add: false });
+    g.fillStyle(0x0b2012, 1);
+    g.fillRect(0, 0, 64, 64);
+    // blades
+    for (let i = 0; i < 70; i++) {
+      const x = Phaser.Math.Between(0, 60);
+      const y = Phaser.Math.Between(0, 60);
+      const h = Phaser.Math.Between(4, 10);
+      g.fillStyle(Phaser.Math.Between(0, 1) ? 0x1e6b3f : 0x2b8c54, 1);
+      g.fillTriangle(x, y + h, x + 2, y, x + 4, y + h);
+    }
+    // subtle speckles
+    g.fillStyle(0x0e2a17, 0.25);
+    for (let i = 0; i < 30; i++) {
+      const x = Phaser.Math.Between(0, 63);
+      const y = Phaser.Math.Between(0, 63);
+      g.fillRect(x, y, 1, 1);
+    }
+    g.generateTexture('ground_tile', 64, 64);
+    g.destroy();
+  }
+
+  // Small flower textures for background decoration
+  {
+    const makeFlower = (key, petalColor, centerColor) => {
+      const f = scene.make.graphics({ x: 0, y: 0, add: false });
+      const cx = 8, cy = 8;
+      // Petals
+      f.fillStyle(petalColor, 1);
+      const petals = 6;
+      for (let i = 0; i < petals; i++) {
+        const ang = (Math.PI * 2 / petals) * i;
+        const px = cx + Math.cos(ang) * 5;
+        const py = cy + Math.sin(ang) * 5;
+        f.fillCircle(px, py, 4);
+      }
+      // Center
+      f.fillStyle(centerColor, 1);
+      f.fillCircle(cx, cy, 3);
+      // Tiny highlight
+      f.fillStyle(0xffffff, 0.3);
+      f.fillCircle(cx + 1, cy - 1, 1);
+      f.generateTexture(key, 16, 16);
+      f.destroy();
+    };
+
+    makeFlower('flower_white',    0xffffff, 0xffd54f);
+    makeFlower('flower_pink',     0xff77a9, 0xfff176);
+    makeFlower('flower_blue',     0x77c1ff, 0xffecb3);
+    makeFlower('flower_lavender', 0xb388ff, 0xfff59d);
+  }
+
+  // Player drop shadow
+  {
+    const sh = scene.make.graphics({ x: 0, y: 0, add: false });
+    sh.fillStyle(0x000000, 1);
+    sh.fillEllipse(32, 16, 64, 24);
+    sh.generateTexture('shadow_oval', 64, 32);
+    sh.destroy();
+  }
+
+  // Shelter (home base) texture
+  {
+    const s = scene.make.graphics({ x: 0, y: 0, add: false });
+    // Roof
+    s.fillStyle(0x2d2b2a, 1);
+    s.fillTriangle(4, 22, 60, 22, 32, 6);
+    // Walls
+    s.fillStyle(0x6b4f2e, 1);
+    s.fillRoundedRect(8, 22, 48, 24, 4);
+    // Door
+    s.fillStyle(0x1b1b1b, 1);
+    s.fillRoundedRect(32 - 6, 28, 12, 16, 2);
+    // Outlines
+    s.lineStyle(2, 0x000000, 0.25);
+    s.strokeTriangle(4, 22, 60, 22, 32, 6);
+    s.strokeRoundedRect(8, 22, 48, 24, 4);
+    s.generateTexture('shelter_home', 64, 48);
+    s.destroy();
+  }
+
+  // Shelter (level 2) fortified texture without turret
+  {
+    const s2 = scene.make.graphics({ x: 0, y: 0, add: false });
+    // Roof (reinforced)
+    s2.fillStyle(0x2b2f33, 1);
+    s2.fillTriangle(4, 22, 60, 22, 32, 4);
+    // Walls (base)
+    s2.fillStyle(0x6b4f2e, 1);
+    s2.fillRoundedRect(8, 22, 48, 24, 4);
+    // Metal plating strip
+    s2.fillStyle(0xaab7c4, 0.85);
+    s2.fillRoundedRect(10, 24, 44, 10, 3);
+    // Door
+    s2.fillStyle(0x0a0a0a, 1);
+    s2.fillRoundedRect(32 - 6, 28, 12, 16, 2);
+    // Outlines
+    s2.lineStyle(2, 0x000000, 0.28);
+    s2.strokeTriangle(4, 22, 60, 22, 32, 4);
+    s2.strokeRoundedRect(8, 22, 48, 24, 4);
+    s2.generateTexture('shelter_home_lv2', 64, 48);
+    s2.destroy();
+  }
+
+  // Shelter turret head texture (separate sprite; points to the right at angle 0)
+  {
+    const t = scene.make.graphics({ x: 0, y: 0, add: false });
+    // Base block
+    t.fillStyle(0xaab7c4, 1);
+    t.fillRoundedRect(2, 6, 10, 8, 2);
+    // Barrel
+    t.fillStyle(0x88e0ff, 1);
+    t.fillRect(12, 9, 14, 2);
+    // Small muzzle cap
+    t.fillStyle(0xb0ecff, 1);
+    t.fillRect(26, 8, 2, 4);
+    // Outline
+    t.lineStyle(1, 0x2b4f5f, 0.8);
+    t.strokeRoundedRect(2.5, 6.5, 9, 7, 2);
+    t.strokeRect(12.5, 9.5, 13, 1);
+    t.generateTexture('shelter_turret_head', 30, 20);
+    t.destroy();
+  }
+
+  // Ally projectile (turret bolt)
+  {
+    const ap = scene.make.graphics({ x: 0, y: 0, add: false });
+    ap.fillStyle(0xb0ecff, 1);
+    ap.fillTriangle(2, 6, 6, 2, 10, 6);
+    ap.fillTriangle(6, 10, 2, 6, 10, 6);
+    ap.lineStyle(1, 0x2b4f5f, 1);
+    ap.strokeTriangle(2, 6, 6, 2, 10, 6);
+    ap.strokeTriangle(6, 10, 2, 6, 10, 6);
+    ap.generateTexture('shelter_projectile', 12, 12);
+    ap.destroy();
+  }
+
+  // Upgrade glow pulse texture
+  {
+    const ug = scene.make.graphics({ x: 0, y: 0, add: false });
+    const cx = 32, cy = 32;
+    ug.fillStyle(0x88e0ff, 0.22);
+    ug.fillCircle(cx, cy, 28);
+    ug.fillStyle(0x88e0ff, 0.14);
+    ug.fillCircle(cx, cy, 20);
+    ug.fillStyle(0xffffff, 0.12);
+    ug.fillCircle(cx, cy, 12);
+    ug.generateTexture('upgrade_glow', 64, 64);
+    ug.destroy();
+  }
+
+  // Chameleon sprite
+  {
+    const g1 = scene.make.graphics({ x: 0, y: 0, add: false });
+    // Palette
+    const cBase   = 0x6ecb3a;  // body base
+    const cBelly  = 0xcdf7b8;  // belly/underside
+    const cDark   = 0x3b8c2a;  // dorsal/dark limbs
+    const cStripe = 0x2e6d21;  // banding
+    const cOutline= 0x103d1a;  // outline
+
+    // Tail: coiled spiral made of circles
+    g1.fillStyle(cBase, 1);
+    for (let i = 0; i <= 18; i++) {
+      const t = i / 18;
+      const ang = t * Math.PI * 2.2 + Math.PI * 0.25;
+      const rr  = 15 - t * 11;
+      const cx = 30 - Math.cos(ang) * (8 + t * 14);
+      const cy = 42 - Math.sin(ang) * (8 + t * 10);
+      g1.fillCircle(cx, cy, Math.max(3, rr));
+    }
+    // Dorsal shade on tail
+    g1.fillStyle(cDark, 0.85);
+    for (let i = 0; i <= 16; i++) {
+      const t = i / 16;
+      const ang = t * Math.PI * 2.2 + Math.PI * 0.25;
+      const rr  = (12 - t * 9) * 0.55;
+      const cx = 30 - Math.cos(ang) * (8 + t * 14);
+      const cy = 40 - Math.sin(ang) * (8 + t * 10);
+      g1.fillCircle(cx, cy, Math.max(1, rr));
+    }
+
+    // Body
+    g1.fillStyle(cBase, 1);
+    g1.fillEllipse(50, 36, 74, 38);
+
+    // Belly highlight
+    g1.fillStyle(cBelly, 1);
+    g1.fillEllipse(46, 40, 46, 20);
+
+    // Head with casque crest
+    g1.fillStyle(cBase, 1);
+    g1.fillEllipse(80, 30, 30, 22);
+    // Casque (crest)
+    g1.fillTriangle(72, 18, 90, 18, 82, 8);
+
+    // Mouth line (subtle)
+    g1.lineStyle(2, cOutline, 0.6);
+    g1.beginPath();
+    g1.moveTo(82, 34);
+    g1.lineTo(94, 32);
+    g1.strokePath();
+
+    // Legs
+    g1.fillStyle(cDark, 1);
+    g1.fillEllipse(34, 56, 18, 8);
+    g1.fillEllipse(22, 50, 18, 8);
+    g1.fillEllipse(58, 56, 18, 8);
+    g1.fillEllipse(70, 50, 18, 8);
+    // Zygodactyl toe pads
+    g1.fillStyle(0x2f7a25, 1);
+    const toes = [
+      {x: 40, y: 58}, {x: 36, y: 60},
+      {x: 18, y: 50}, {x: 22, y: 52},
+      {x: 64, y: 58}, {x: 60, y: 60},
+      {x: 72, y: 50}, {x: 76, y: 51}
+    ];
+    for (const t of toes) g1.fillCircle(t.x, t.y, 2.4);
+
+    // Turret eye with highlight
+    g1.fillStyle(0xffffff, 1);
+    g1.fillCircle(88, 24, 6);
+    g1.fillStyle(0x24342a, 1);
+    g1.fillCircle(88, 24, 2.8);
+    g1.fillStyle(0xffffff, 0.8);
+    g1.fillCircle(90, 23, 1.3);
+
+    // Body banding
+    g1.fillStyle(cStripe, 0.95);
+    g1.fillEllipse(56, 26, 22, 8);
+    g1.fillEllipse(66, 36, 24, 8);
+    g1.fillEllipse(74, 44, 20, 7);
+
+    // Body sheen
+    g1.fillStyle(0xffffff, 0.10);
+    g1.fillEllipse(60, 24, 26, 12);
+
+    // Outlines
+    g1.lineStyle(2, cOutline, 0.6);
+    g1.strokeEllipse(50, 36, 74, 38);
+    g1.strokeEllipse(80, 30, 30, 22);
+
+    g1.generateTexture('chameleon', 96, 64);
+    g1.destroy();
+  }
+
+  // Enemies: beetle
+  {
+    const eg = scene.make.graphics({ x: 0, y: 0, add: false });
+    const C_SHELL = 0x8c1d1d;
+    const C_HILITE = 0xb23333;
+    const C_HEAD = 0x4a1212;
+    const C_OUT = 0x3a0d0d;
+
+    eg.lineStyle(2, C_OUT, 1);
+    eg.beginPath();
+    // Legs
+    eg.moveTo(18, 10); eg.lineTo(10, 4);
+    eg.moveTo(18, 12); eg.lineTo(10, 8);
+    eg.moveTo(22, 18); eg.lineTo(32, 10);
+    eg.moveTo(22, 20); eg.lineTo(32, 26);
+    eg.moveTo(28, 22); eg.lineTo(36, 28);
+    eg.moveTo(26, 20); eg.lineTo(34, 30);
+    eg.strokePath();
+
+    eg.fillStyle(C_SHELL, 1);
+    eg.fillEllipse(22, 16, 34, 22);
+
+    eg.fillStyle(C_SHELL, 1);
+    eg.fillRoundedRect(12, 10, 12, 12, 3);
+
+    eg.fillStyle(C_HEAD, 1);
+    eg.fillCircle(8, 16, 6);
+
+    eg.fillStyle(C_HEAD, 1);
+    eg.fillTriangle(8, 16, 2, 8, 6, 12);
+    eg.fillTriangle(8, 16, 2, 24, 6, 20);
+    eg.fillTriangle(1, 8, 4, 8, 2, 6);
+    eg.fillTriangle(1, 24, 4, 24, 2, 26);
+
+    eg.fillStyle(0xffffff, 1);
+    eg.fillCircle(9, 13, 2);
+    eg.fillStyle(0x000000, 1);
+    eg.fillCircle(9, 13, 1);
+
+    eg.fillStyle(C_HILITE, 1);
+    eg.fillEllipse(22, 12, 24, 12);
+
+    eg.lineStyle(1, C_OUT, 0.75);
+    eg.beginPath();
+    eg.moveTo(22, 6); eg.lineTo(22, 26);
+    eg.strokePath();
+    eg.strokeEllipse(22, 16, 32, 20);
+    eg.lineStyle(1, C_OUT, 0.5);
+    eg.strokeRoundedRect(12, 10, 12, 12, 3);
+
+    eg.generateTexture('enemy_beetle', 40, 32);
+    eg.destroy();
+  }
+
+  // Enemies: fly
+  {
+    const fg = scene.make.graphics({ x: 0, y: 0, add: false });
+    fg.fillStyle(0xccddff, 0.45);
+    fg.fillEllipse(26, 10, 16, 10);
+    fg.fillEllipse(26, 22, 16, 10);
+    fg.fillStyle(0x2e2e38, 1);
+    fg.fillEllipse(16, 16, 24, 18);
+    fg.fillStyle(0x3a3a46, 1);
+    fg.fillCircle(6, 16, 7);
+    fg.fillStyle(0xffffff, 1);
+    fg.fillCircle(4, 14, 2);
+    fg.fillStyle(0x000000, 1);
+    fg.fillCircle(4, 14, 1);
+    fg.lineStyle(1, 0x1f1f27, 0.6);
+    fg.strokeEllipse(16, 16, 20, 14);
+    fg.generateTexture('enemy_fly', 40, 32);
+    fg.destroy();
+  }
+
+  // Enemies: ant
+  {
+    const ag = scene.make.graphics({ x: 0, y: 0, add: false });
+    ag.fillStyle(0xff7a1a, 1);
+    ag.fillEllipse(8, 16, 10, 8);
+    ag.fillEllipse(18, 16, 12, 9);
+    ag.fillEllipse(30, 16, 14, 10);
+    ag.fillStyle(0xffc27a, 0.7);
+    ag.fillEllipse(30, 14, 8, 3);
+    ag.fillEllipse(18, 14, 7, 2.5);
+    ag.lineStyle(2, 0x3a1f0a, 1);
+    ag.beginPath();
+    ag.moveTo(16, 12); ag.lineTo(10, 8);
+    ag.moveTo(16, 20); ag.lineTo(10, 24);
+    ag.moveTo(22, 12); ag.lineTo(28, 8);
+    ag.moveTo(22, 20); ag.lineTo(28, 24);
+    ag.moveTo(26, 12); ag.lineTo(34, 8);
+    ag.moveTo(26, 20); ag.lineTo(34, 24);
+    ag.strokePath();
+    ag.beginPath();
+    ag.moveTo(6, 14); ag.lineTo(2, 10);
+    ag.moveTo(6, 18); ag.lineTo(2, 22);
+    ag.strokePath();
+    ag.fillStyle(0xffffff, 1);
+    ag.fillCircle(6, 15, 1.5);
+    ag.fillStyle(0x000000, 1);
+    ag.fillCircle(6, 15, 0.7);
+    ag.lineStyle(1, 0x2b0d0d, 0.6);
+    ag.strokeEllipse(8, 16, 10, 8);
+    ag.strokeEllipse(18, 16, 12, 9);
+    ag.strokeEllipse(30, 16, 14, 10);
+    ag.generateTexture('enemy_ant', 40, 32);
+    ag.destroy();
+  }
+
+  // Enemies: wasp (ranged)
+  {
+    const wg = scene.make.graphics({ x: 0, y: 0, add: false });
+    wg.fillStyle(0xccddff, 0.45);
+    wg.fillEllipse(28, 10, 18, 12);
+    wg.fillEllipse(28, 22, 18, 12);
+    wg.fillStyle(0x1f1f1f, 1);
+    wg.fillEllipse(16, 16, 28, 18);
+    wg.fillStyle(0xffd600, 1);
+    wg.fillRect(6, 10, 18, 4);
+    wg.fillRect(6, 16, 18, 4);
+    wg.fillRect(6, 22, 18, 4);
+    wg.fillStyle(0x1f1f1f, 1);
+    wg.fillCircle(6, 16, 6);
+    wg.fillStyle(0xffffff, 1);
+    wg.fillCircle(4, 14, 2);
+    wg.fillStyle(0x000000, 1);
+    wg.fillCircle(4, 14, 1);
+    wg.fillStyle(0xffd600, 1);
+    wg.fillTriangle(28, 16, 36, 14, 36, 18);
+    wg.lineStyle(1, 0x111111, 0.6);
+    wg.strokeEllipse(16, 16, 26, 16);
+    wg.generateTexture('enemy_wasp', 40, 32);
+    wg.destroy();
+  }
+
+  // Enemies: caterpillar (tank)
+  {
+    const cg = scene.make.graphics({ x: 0, y: 0, add: false });
+    const segs = 6;
+    cg.fillStyle(0xffd600, 1);
+    for (let i = 0; i < segs; i++) {
+      const cx = 12 + i * 9;
+      cg.fillEllipse(cx, 18, 18, 14);
+    }
+    cg.fillStyle(0x111111, 1);
+    for (let i = 0; i < segs; i++) {
+      const cx = 12 + i * 9;
+      cg.fillEllipse(cx - 4, 18, 3, 12);
+      cg.fillEllipse(cx,     18, 3, 14);
+      cg.fillEllipse(cx + 4, 18, 3, 12);
+    }
+    cg.fillStyle(0xffd600, 1);
+    cg.fillEllipse(10, 18, 20, 16);
+    cg.fillStyle(0x111111, 1);
+    cg.fillEllipse(10 - 4, 18, 4, 14);
+    cg.fillEllipse(10 + 4, 18, 4, 14);
+    cg.lineStyle(2, 0x111111, 1);
+    for (let lx = 14; lx <= 56; lx += 8) {
+      cg.beginPath();
+      cg.moveTo(lx, 28); cg.lineTo(lx - 4, 34);
+      cg.moveTo(lx, 28); cg.lineTo(lx + 4, 34);
+      cg.strokePath();
+    }
+    cg.fillStyle(0xffffff, 1);
+    cg.fillCircle(6, 14, 2);
+    cg.fillStyle(0x000000, 1);
+    cg.fillCircle(6, 14, 1);
+    cg.generateTexture('enemy_caterpillar', 64, 36);
+    cg.destroy();
+  }
+
+  // Enemies: spider (wanderer) - two frames for leg scuttle
+  {
+    const makeSpider = (key, legOffset = 0) => {
+      const sg = scene.make.graphics({ x: 0, y: 0, add: false });
+      const W = 40, H = 32;
+      sg.fillStyle(0x1b1b1b, 1);
+      sg.fillEllipse(22, 16, 22, 16);
+      sg.fillStyle(0x2a2a2a, 1);
+      sg.fillEllipse(14, 16, 12, 10);
+      sg.fillStyle(0xffffff, 0.7);
+      sg.fillCircle(11, 13, 1.2);
+      sg.lineStyle(2, 0x111111, 1);
+      const cx = 16, cy = 16;
+      for (let i = 0; i < 4; i++) {
+        const baseAng = (-Math.PI * 0.55) + i * (Math.PI * 0.22);
+        const mirror = -baseAng;
+        const amp = 0.25;
+        const delta = (i % 2 === 0 ? 1 : -1) * amp * legOffset;
+        const a1 = baseAng + delta;
+        const a2 = mirror - delta;
+        const len = 12 + i * 1.5;
+        const p1x = cx + Math.cos(a1) * 8;
+        const p1y = cy + Math.sin(a1) * 6;
+        const p2x = p1x + Math.cos(a1) * len;
+        const p2y = p1y + Math.sin(a1) * len;
+        const q1x = cx + Math.cos(a2) * 8;
+        const q1y = cy + Math.sin(a2) * 6;
+        const q2x = q1x + Math.cos(a2) * len;
+        const q2y = q1y + Math.sin(a2) * len;
+        sg.beginPath(); sg.moveTo(p1x, p1y); sg.lineTo(p2x, p2y); sg.strokePath();
+        sg.beginPath(); sg.moveTo(q1x, q1y); sg.lineTo(q2x, q2y); sg.strokePath();
+      }
+      sg.fillStyle(0x444444, 0.35);
+      sg.fillEllipse(22, 12, 16, 6);
+      sg.lineStyle(1, 0x0d0d0d, 0.6);
+      sg.strokeEllipse(22, 16, 22, 16);
+      sg.strokeEllipse(14, 16, 12, 10);
+      sg.generateTexture(key, W, H);
+      sg.destroy();
+    };
+    makeSpider('enemy_spider_1', 1);
+    makeSpider('enemy_spider_2', -1);
+  }
+
+  // Enemies: snake (rainbow slithering chaser)
+  {
+    const sg = scene.make.graphics({ x: 0, y: 0, add: false });
+    const W = 80, H = 26;
+    const bands = [
+      0xff3b30, 0xff9500, 0xffcc00, 0x34c759, 0x007aff, 0x5856d6, 0xaf52de
+    ];
+    sg.fillStyle(0x000000, 0);
+    sg.fillRect(0, 0, W, H);
+    for (let i = 0; i < bands.length; i++) {
+      const c = bands[i];
+      sg.fillStyle(c, 1);
+      const t = i / (bands.length - 1);
+      const cx = 10 + t * 58;
+      const rY = 8 + Math.sin(t * Math.PI) * 2.5;
+      sg.fillEllipse(cx, H / 2, 20, rY * 2);
+    }
+    sg.fillStyle(0xffcc00, 1);
+    sg.fillEllipse(12, H / 2, 18, 14);
+    sg.fillStyle(0xffffff, 1);
+    sg.fillCircle(8, H / 2 - 3, 2.4);
+    sg.fillStyle(0x000000, 1);
+    sg.fillCircle(8, H / 2 - 3, 1.2);
+    sg.lineStyle(1, 0x111111, 0.6);
+    sg.strokeEllipse(40, H / 2, 64, 18);
+    sg.strokeEllipse(12, H / 2, 18, 14);
+    sg.generateTexture('enemy_snake', W, H);
+    sg.destroy();
+  }
+
+  // Stun stars overlay
+  {
+    const st = scene.make.graphics({ x: 0, y: 0, add: false });
+    const W = 36, H = 36;
+    st.clear();
+    const star = (cx, cy, r, color) => {
+      st.fillStyle(color, 1);
+      for (let i = 0; i < 5; i++) {
+        const a1 = (i * 2 * Math.PI) / 5 - Math.PI / 2;
+        const a2 = a1 + Math.PI / 5;
+        const x1 = cx + Math.cos(a1) * r;
+        const y1 = cy + Math.sin(a1) * r;
+        const x2 = cx + Math.cos(a2) * (r * 0.5);
+        const y2 = cy + Math.sin(a2) * (r * 0.5);
+        st.fillTriangle(cx, cy, x1, y1, x2, y2);
+      }
+    };
+    star(W * 0.35, H * 0.35, 8, 0xfff59d);
+    star(W * 0.65, H * 0.6, 6, 0xffeb3b);
+    st.fillStyle(0xffffff, 0.16);
+    st.fillCircle(W / 2, H / 2, 14);
+    st.generateTexture('stun_stars', W, H);
+    st.destroy();
+  }
+
+  // Web trap (static)
+  {
+    const w = scene.make.graphics({ x: 0, y: 0, add: false });
+    const W = 40, H = 40;
+    const cx = W / 2, cy = H / 2;
+    w.clear();
+    w.lineStyle(2, 0xffffff, 0.9);
+    const spokes = 8;
+    for (let i = 0; i < spokes; i++) {
+      const ang = (Math.PI * 2 / spokes) * i;
+      w.beginPath();
+      w.moveTo(cx, cy);
+      w.lineTo(cx + Math.cos(ang) * (W * 0.46), cy + Math.sin(ang) * (H * 0.46));
+      w.strokePath();
+    }
+    const rings = [0.15, 0.32, 0.48, 0.64, 0.78];
+    for (const r of rings) {
+      w.beginPath();
+      w.strokeCircle(cx, cy, Math.min(W, H) * r * 0.5);
+    }
+    w.fillStyle(0xffffff, 0.06);
+    w.fillCircle(cx, cy, 18);
+    w.generateTexture('web_trap', W, H);
+    w.destroy();
+  }
+
+  // Projectile: stinger
+  {
+    const pg = scene.make.graphics({ x: 0, y: 0, add: false });
+    pg.fillStyle(0xffef66, 1);
+    pg.fillTriangle(2, 4, 14, 8, 2, 12);
+    pg.lineStyle(1, 0x6b5e00, 1);
+    pg.strokeTriangle(2, 4, 14, 8, 2, 12);
+    pg.generateTexture('stinger_projectile', 16, 16);
+    pg.destroy();
+  }
+
+  // Tongue tip + splat particle
+  {
+    const tg = scene.make.graphics({ x: 0, y: 0, add: false });
+    tg.fillStyle(0xff94c2, 1);
+    tg.fillCircle(6, 6, 6);
+    tg.fillStyle(0xffffff, 0.5);
+    tg.fillCircle(9, 4, 2);
+    tg.generateTexture('tongue_tip', 12, 12);
+    tg.destroy();
+
+    const sp = scene.make.graphics({ x: 0, y: 0, add: false });
+    sp.fillStyle(0xff7fb4, 1);
+    sp.fillCircle(4, 4, 4);
+    sp.generateTexture('splat_particle', 8, 8);
+    sp.destroy();
+  }
+
+  // Heart pickup
+  {
+    const hg = scene.make.graphics({ x: 0, y: 0, add: false });
+    hg.fillStyle(0xff4d6d, 1);
+    hg.fillCircle(10, 9, 8);
+    hg.fillCircle(20, 9, 8);
+    hg.fillTriangle(2, 13, 28, 13, 16, 28);
+    hg.fillStyle(0xffffff, 0.18);
+    hg.fillCircle(8, 7, 3);
+    hg.generateTexture('heart_pickup', 32, 32);
+    hg.destroy();
+  }
+
+  // Heart UI (white) texture for HUD extra hearts (tint-safe)
+  {
+    const hu = scene.make.graphics({ x: 0, y: 0, add: false });
+    hu.fillStyle(0xffffff, 1);
+    hu.fillCircle(10, 9, 8);
+    hu.fillCircle(20, 9, 8);
+    hu.fillTriangle(2, 13, 28, 13, 16, 28);
+    hu.fillStyle(0xffffff, 0.24);
+    hu.fillEllipse(12, 8, 8, 4);
+    hu.generateTexture('heart_ui', 32, 32);
+    hu.destroy();
+  }
+
+  // Armor pickup (chainmail icon)
+  {
+    const ag = scene.make.graphics({ x: 0, y: 0, add: false });
+    ag.fillStyle(0x2b2f33, 1);
+    ag.fillRoundedRect(0, 0, 32, 32, 4);
+    ag.lineStyle(2, 0xc0c9d6, 1);
+    for (let ry = 6; ry <= 26; ry += 6) {
+      for (let rx = 6; rx <= 26; rx += 6) {
+        ag.strokeCircle(rx, ry, 3);
+      }
+    }
+    ag.fillStyle(0x000000, 0.15);
+    ag.fillCircle(16, 6, 5);
+    ag.fillStyle(0xffffff, 0.08);
+    ag.fillRoundedRect(2, 2, 10, 6, 3);
+    ag.generateTexture('armor_pickup', 32, 32);
+    ag.destroy();
+  }
+
+  // Armor overlay texture
+  {
+    const og = scene.make.graphics({ x: 0, y: 0, add: false });
+    og.fillStyle(0x000000, 0);
+    og.fillRect(0, 0, 96, 64);
+    og.lineStyle(2, 0xbac6d6, 0.8);
+    for (let yy = 8; yy <= 56; yy += 12) {
+      for (let xx = 12; xx <= 84; xx += 12) {
+        og.strokeCircle(xx, yy, 5);
+      }
+    }
+    og.fillStyle(0x0a0a0a, 0.10);
+    og.fillRoundedRect(14, 14, 68, 36, 10);
+    og.generateTexture('armor_overlay', 96, 64);
+    og.destroy();
+  }
+
+  // Camouflage pickup texture
+  {
+    const cam = scene.make.graphics({ x: 0, y: 0, add: false });
+    cam.fillStyle(0x2e3d25, 1);
+    cam.fillRoundedRect(0, 0, 32, 32, 4);
+    const cols = [0x6b8f3f, 0x3e5a2b, 0xa4895a, 0x8aa37e];
+    for (let i = 0; i < 16; i++) {
+      const c = cols[Phaser.Math.Between(0, cols.length - 1)];
+      cam.fillStyle(c, 0.95);
+      const w = Phaser.Math.Between(6, 12);
+      const h = Phaser.Math.Between(4, 10);
+      const x = Phaser.Math.Between(2, 30 - w);
+      const y = Phaser.Math.Between(2, 30 - h);
+      cam.fillEllipse(x, y, w, h);
+    }
+    cam.fillStyle(0x556b2f, 1);
+    cam.fillRoundedRect(8, 8, 16, 8, 4);
+    cam.fillStyle(0x2b2f33, 1);
+    cam.fillRect(8, 16, 16, 2);
+    cam.generateTexture('camo_pickup', 32, 32);
+    cam.destroy();
+  }
+
+  // Camouflage overlay texture
+  {
+    const cov = scene.make.graphics({ x: 0, y: 0, add: false });
+    cov.fillStyle(0x000000, 0);
+    cov.fillRect(0, 0, 96, 64);
+    const cols = [0x5b7f3a, 0x3e5a2b, 0xa4895a, 0x8aa37e];
+    for (let i = 0; i < 40; i++) {
+      const c = cols[Phaser.Math.Between(0, cols.length - 1)];
+      cov.fillStyle(c, 0.68);
+      const rx = Phaser.Math.Between(8, 88);
+      const ry = Phaser.Math.Between(8, 56);
+      const rw = Phaser.Math.Between(10, 22);
+      const rh = Phaser.Math.Between(6, 16);
+      cov.fillEllipse(rx, ry, rw, rh);
+    }
+    cov.fillStyle(0x4b5e2a, 0.95);
+    cov.fillRoundedRect(68, 10, 28, 12, 4);
+    cov.fillRect(68, 20, 28, 3);
+    cov.fillStyle(0x2b2f33, 0.9);
+    cov.fillRect(82, 22, 2, 16);
+    cov.generateTexture('camo_overlay', 96, 64);
+    cov.destroy();
+  }
+
+  // Spray can pickup texture
+  {
+    const sc = scene.make.graphics({ x: 0, y: 0, add: false });
+    sc.fillStyle(0xc62828, 1);
+    sc.fillRoundedRect(6, 8, 20, 20, 4);
+    sc.fillStyle(0xffffee, 0.85);
+    sc.fillCircle(16, 18, 6);
+    sc.fillStyle(0x000000, 1);
+    sc.fillCircle(16, 18, 2);
+    sc.lineStyle(2, 0x000000, 1);
+    sc.beginPath();
+    sc.moveTo(13, 14); sc.lineTo(11, 12);
+    sc.moveTo(13, 22); sc.lineTo(11, 24);
+    sc.moveTo(19, 14); sc.lineTo(21, 12);
+    sc.moveTo(19, 22); sc.lineTo(21, 24);
+    sc.strokePath();
+    sc.fillStyle(0xb0bec5, 1);
+    sc.fillRect(10, 6, 12, 4);
+    sc.fillStyle(0xeeeeee, 1);
+    sc.fillRect(18, 4, 4, 4);
+    sc.fillStyle(0x000000, 1);
+    sc.fillRect(20, 4, 2, 2);
+    sc.fillStyle(0xffffff, 0.18);
+    sc.fillRoundedRect(8, 10, 8, 6, 3);
+    sc.generateTexture('spray_can', 32, 32);
+    sc.destroy();
+  }
+
+  // Spray particle texture
+  {
+    const pp = scene.make.graphics({ x: 0, y: 0, add: false });
+    pp.fillStyle(0xe8fff4, 0.95);
+    pp.fillCircle(4, 4, 3.5);
+    pp.fillStyle(0xffffff, 0.35);
+    pp.fillCircle(5, 3, 1.2);
+    pp.generateTexture('spray_particle', 8, 8);
+    pp.destroy();
+  }
+
+  // Upgrade panel background
+  {
+    const bg = scene.make.graphics({ x: 0, y: 0, add: false });
+    bg.fillStyle(0x222222, 0.95);
+    bg.fillRoundedRect(0, 0, 520, 360, 12);
+    bg.lineStyle(2, 0xffffff, 0.2);
+    bg.strokeRoundedRect(1, 1, 518, 358, 12);
+    bg.generateTexture('upgrade_bg', 520, 360);
+    bg.destroy();
+  }
+
+  // Boss enemy texture
+  {
+    const bg = scene.make.graphics({ x: 0, y: 0, add: false });
+    const W = 80, H = 60;
+    const segs = 7;
+    bg.fillStyle(0x9b59b6, 1);
+    for (let i = 0; i < segs; i++) {
+      const cx = 10 + i * 10;
+      const rx = 18 + Math.min(i, segs - 1 - i) * 2;
+      bg.fillEllipse(cx + 10, H / 2, rx, 16);
+    }
+    bg.fillStyle(0x4a235a, 1);
+    for (let i = 0; i < segs; i++) {
+      const cx = 10 + i * 10;
+      bg.fillEllipse(cx + 10, H / 2, 6, 18);
+    }
+    bg.fillStyle(0x8e44ad, 1);
+    bg.fillEllipse(16, H / 2, 28, 20);
+    bg.fillStyle(0x4a235a, 1);
+    bg.fillTriangle(6, H / 2, 0, H / 2 - 10, 2, H / 2 - 2);
+    bg.fillTriangle(6, H / 2, 0, H / 2 + 10, 2, H / 2 + 2);
+    bg.fillStyle(0xffffff, 1);
+    bg.fillCircle(12, H / 2 - 4, 3);
+    bg.fillStyle(0x000000, 1);
+    bg.fillCircle(12, H / 2 - 4, 1.5);
+    bg.lineStyle(1, 0x2e1042, 0.6);
+    bg.strokeEllipse(16, H / 2, 28, 20);
+    bg.strokeEllipse(46, H / 2, 56, 20);
+    bg.generateTexture('enemy_boss', W, H);
+    bg.destroy();
+  }
+}
+class StartScene extends Phaser.Scene {
+  constructor() {
+    super({ key: 'StartScene' });
+  }
+
+  create() {
+    const w = this.scale.width;
+    const h = this.scale.height;
+
+    // Generate textures and draw world background
+    generateTextures(this);
+
+    // Background ground tile
+    this.add.tileSprite(0, 0, w, h, 'ground_tile').setOrigin(0).setDepth(0);
+
+    // Flowers decoration scattered over grass
+    {
+      const flowerKeys = ['flower_white', 'flower_pink', 'flower_blue', 'flower_lavender'];
+      const area = w * h;
+      const count = Math.round(area / 50000);
+      for (let i = 0; i < count; i++) {
+        const key = flowerKeys[Phaser.Math.Between(0, flowerKeys.length - 1)];
+        const x = Phaser.Math.Between(10, w - 10);
+        const y = Phaser.Math.Between(10, h - 10);
+        const img = this.add.image(x, y, key);
+        img.setDepth(0.8);
+        img.setRotation(Phaser.Math.FloatBetween(0, Math.PI * 2));
+        img.setScale(Phaser.Math.FloatBetween(0.7, 1.15));
+        img.setAlpha(Phaser.Math.FloatBetween(0.9, 1));
+      }
+    }
+
+    // Shelter preview (static)
+    this.add.image(120, h - 100, 'shelter_home').setDepth(3);
+
+    // Title at the top
+    const title = this.add.text(w / 2, 120, 'Rad Chameleon Royale', {
+      fontFamily: 'monospace',
+      fontSize: '52px',
+      color: '#eaffea'
+    }).setOrigin(0.5).setDepth(10);
+    title.setStroke('#000000', 6);
+    title.setShadow(0, 4, '#000000', 4, true, true);
+
+    // Prompt below with sufficient spacing
+    const prompt = this.add.text(w / 2, 260, 'Press SPACE to Start', {
+      fontFamily: 'monospace',
+      fontSize: '24px',
+      color: '#ffffff'
+    }).setOrigin(0.5).setDepth(10);
+    prompt.setShadow(0, 2, '#000000', 2, true, true);
+
+    // Subtle pulse to draw attention
+    this.tweens.add({
+      targets: prompt,
+      alpha: { from: 0.6, to: 1.0 },
+      duration: 900,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut'
+    });
+
+    // Start only on SPACE
+    this.input.keyboard.once('keydown-SPACE', () => {
+      this.scene.start('GameScene');
+    });
+  }
+}
 class GameScene extends Phaser.Scene {
   constructor() {
     super({ key: 'GameScene' });
@@ -164,6 +1001,10 @@ class GameScene extends Phaser.Scene {
   }
 
   preload() {
+    // Shared procedural textures. Ensure keys exist for StartScene background.
+    generateTextures(this);
+    // Skip the legacy inline generation below to avoid duplicate work/overwrites.
+    return;
     // Procedural textures for richer visuals (no external assets)
 
     // Ground tile
@@ -3770,7 +4611,7 @@ const config = {
   height: 600,
   backgroundColor: '#0a0a0a',
   audio: { disableWebAudio: false, noAudio: false },
-  scene: [GameScene],
+  scene: [StartScene, GameScene],
   physics: {
     default: 'arcade',
     arcade: {
