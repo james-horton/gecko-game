@@ -91,8 +91,11 @@ class GameScene extends Phaser.Scene {
     this.shelterHasTurret = false;
     this.shelterUpgradeHealthBoost = 8;
     this.allyProjectiles = null;
-    this.shelterRange = 260;
-    this.shelterShootCooldown = 1200;
+    // Turret baseline: starts slower with limited range; later upgrades improve slightly
+    this.shelterRangeBase = 180;
+    this.shelterShootCooldownBase = 1800;
+    this.shelterRange = this.shelterRangeBase;
+    this.shelterShootCooldown = this.shelterShootCooldownBase;
     this.nextShelterShotAt = 0;
     this.shelterProjectileSpeed = 340;
     this.shelterProjectileDamage = 1;
@@ -686,8 +689,10 @@ class GameScene extends Phaser.Scene {
     this.shelterHasTurret = false;
     this.shelterUpgradeHealthBoost = 8;
     // Turret baseline stats (become active at level >= 2)
-    this.shelterRange = 260;
-    this.shelterShootCooldown = 1200;
+    this.shelterRangeBase = 180;
+    this.shelterShootCooldownBase = 1800;
+    this.shelterRange = this.shelterRangeBase;
+    this.shelterShootCooldown = this.shelterShootCooldownBase;
     this.nextShelterShotAt = 0;
     this.shelterProjectileSpeed = 340;
     this.shelterProjectileDamage = 1;
@@ -1415,9 +1420,12 @@ class GameScene extends Phaser.Scene {
     // Activate turret from level 2 onward and scale a bit with higher levels
     if (this.shelterLevel >= 2) {
       this.shelterHasTurret = true;
-      const extra = this.shelterLevel - 1;
-      this.shelterRange = (this.shelterRange || 260) + Math.max(0, extra - 1) * 20;
-      this.shelterShootCooldown = Math.max(500, (this.shelterShootCooldown || 1200) - extra * 120);
+      // Improvements kick in from level 3 onward; level 2 uses baseline
+      const improve = Math.max(0, this.shelterLevel - 2);
+      const baseRange = (this.shelterRangeBase != null) ? this.shelterRangeBase : (this.shelterRange || 180);
+      const baseCd = (this.shelterShootCooldownBase != null) ? this.shelterShootCooldownBase : (this.shelterShootCooldown || 1800);
+      this.shelterRange = baseRange + improve * 20; // slight range increase per upgrade
+      this.shelterShootCooldown = Math.max(700, baseCd - improve * 120); // slightly faster fire rate per upgrade
       if (this.shelterLevel >= 3) {
         this.shelterProjectileDamage = Math.min(5, (this.shelterProjectileDamage || 1) + 1);
       }
