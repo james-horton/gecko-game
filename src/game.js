@@ -456,6 +456,48 @@ class GameScene extends Phaser.Scene {
       fg.destroy();
     }
 
+    // Enemies: ant (fast chaser, easy to see)
+    {
+      const ag = this.make.graphics({ x: 0, y: 0, add: false });
+      // Body segments (bright orange for visibility)
+      ag.fillStyle(0xff7a1a, 1);
+      // Head, thorax, abdomen
+      ag.fillEllipse(8, 16, 10, 8);
+      ag.fillEllipse(18, 16, 12, 9);
+      ag.fillEllipse(30, 16, 14, 10);
+      // Subtle highlights
+      ag.fillStyle(0xffc27a, 0.7);
+      ag.fillEllipse(30, 14, 8, 3);
+      ag.fillEllipse(18, 14, 7, 2.5);
+      // Legs (three pairs)
+      ag.lineStyle(2, 0x3a1f0a, 1);
+      ag.beginPath();
+      ag.moveTo(16, 12); ag.lineTo(10, 8);
+      ag.moveTo(16, 20); ag.lineTo(10, 24);
+      ag.moveTo(22, 12); ag.lineTo(28, 8);
+      ag.moveTo(22, 20); ag.lineTo(28, 24);
+      ag.moveTo(26, 12); ag.lineTo(34, 8);
+      ag.moveTo(26, 20); ag.lineTo(34, 24);
+      ag.strokePath();
+      // Antennae
+      ag.beginPath();
+      ag.moveTo(6, 14); ag.lineTo(2, 10);
+      ag.moveTo(6, 18); ag.lineTo(2, 22);
+      ag.strokePath();
+      // Eye
+      ag.fillStyle(0xffffff, 1);
+      ag.fillCircle(6, 15, 1.5);
+      ag.fillStyle(0x000000, 1);
+      ag.fillCircle(6, 15, 0.7);
+      // Segment outlines
+      ag.lineStyle(1, 0x2b0d0d, 0.6);
+      ag.strokeEllipse(8, 16, 10, 8);
+      ag.strokeEllipse(18, 16, 12, 9);
+      ag.strokeEllipse(30, 16, 14, 10);
+      ag.generateTexture('enemy_ant', 40, 32);
+      ag.destroy();
+    }
+    
     // Enemies: wasp (ranged)
     {
       const wg = this.make.graphics({ x: 0, y: 0, add: false });
@@ -1002,7 +1044,7 @@ class GameScene extends Phaser.Scene {
         const type = e.getData && e.getData('type');
         if (type === 'enemy_wasp') {
           this.updateWaspAI(e, now);
-        } else if (type === 'enemy_fly') {
+        } else if (type === 'enemy_fly' || type === 'enemy_ant') {
           this.updateFlyAI(e, now);
         } else if (type === 'enemy_beetle' || type === 'enemy_caterpillar') {
           this.updateTankAI(e, now);
@@ -1851,6 +1893,27 @@ class GameScene extends Phaser.Scene {
         repeat: -1,
         ease: 'Sine.easeInOut'
       });
+    } else if (type === 'enemy_ant') {
+      // fast chaser that targets the player; slightly slower than chameleon
+      hp = 1;
+      contactDamage = 0.5;
+      const baseSp = Phaser.Math.Between(180, 200);
+      let sp = Math.max(10, Math.floor(baseSp * (this.enemySpeedScale || 1)));
+      // ensure ant stays just below player speed, even with upgrades
+      if (this.speed && Number.isFinite(this.speed)) {
+        sp = Math.min(sp, Math.max(30, this.speed - 10));
+      }
+      enemy.setData('speed', sp);
+      const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
+      enemy.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp);
+      this.tweens.add({
+        targets: enemy,
+        scale: { from: 0.98, to: 1.04 },
+        duration: 300,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut'
+      });
     } else {
       // enemy_wasp: ranged pursuer
       enemy.setVelocity(0, 0);
@@ -2608,6 +2671,20 @@ class GameScene extends Phaser.Scene {
     const canSpawnWasp = this.waspsUnlocked && waspCount < (this.maxActiveWasps || 0);
     if (!canSpawnWasp) weights.enemy_wasp = 0;
 
+    // Add ant weights (fast but weak)
+    if (k < 5) {
+      weights.enemy_ant = 1;
+    } else if (k < 10) {
+      weights.enemy_ant = 2;
+    } else if (k < 16) {
+      weights.enemy_ant = 3;
+    } else if (k < 24) {
+      weights.enemy_ant = 3;
+    } else if (k < 34) {
+      weights.enemy_ant = 3;
+    } else {
+      weights.enemy_ant = 3;
+    }
     const bag = [];
     for (const [key, w] of Object.entries(weights)) {
       for (let i = 0; i < w; i++) bag.push(key);
