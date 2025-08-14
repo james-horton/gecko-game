@@ -65,6 +65,11 @@ class GameScene extends Phaser.Scene {
     this.sprayRange = 200;
     this.sprayHalfAngle = Phaser.Math.DegToRad(25);
     this.sprayText = null;
+    // Camouflage / invisibility pickup
+    this.camoPickups = null;
+    this.camoDropChance = 0.10;
+    this.camoOverlay = null;
+    this.invisibleUntil = 0;
     // Upgrades / combat
     this.isChoosingUpgrade = false;
     this.upgradeChoices = [];
@@ -841,6 +846,63 @@ class GameScene extends Phaser.Scene {
       og.generateTexture('armor_overlay', 96, 64);
       og.destroy();
     }
+
+    // Camouflage pickup texture
+    {
+      const cam = this.make.graphics({ x: 0, y: 0, add: false });
+      // Base tile with rounded corners
+      cam.fillStyle(0x2e3d25, 1);
+      cam.fillRoundedRect(0, 0, 32, 32, 4);
+      // Camo splotches
+      const cols = [0x6b8f3f, 0x3e5a2b, 0xa4895a, 0x8aa37e];
+      for (let i = 0; i < 16; i++) {
+        const c = cols[Phaser.Math.Between(0, cols.length - 1)];
+        cam.fillStyle(c, 0.95);
+        const w = Phaser.Math.Between(6, 12);
+        const h = Phaser.Math.Between(4, 10);
+        const x = Phaser.Math.Between(2, 30 - w);
+        const y = Phaser.Math.Between(2, 30 - h);
+        cam.fillEllipse(x, y, w, h);
+      }
+      // Tiny helmet hint
+      cam.fillStyle(0x556b2f, 1);
+      cam.fillRoundedRect(8, 8, 16, 8, 4);
+      cam.fillStyle(0x2b2f33, 1);
+      cam.fillRect(8, 16, 16, 2);
+      cam.generateTexture('camo_pickup', 32, 32);
+      cam.destroy();
+    }
+
+    // Camouflage overlay texture rendered on the chameleon while invisible
+    {
+      const cov = this.make.graphics({ x: 0, y: 0, add: false });
+      // Transparent base sized to chameleon (96x64)
+      cov.fillStyle(0x000000, 0);
+      cov.fillRect(0, 0, 96, 64);
+
+      // Camo splotch pattern
+      const cols = [0x5b7f3a, 0x3e5a2b, 0xa4895a, 0x8aa37e];
+      for (let i = 0; i < 40; i++) {
+        const c = cols[Phaser.Math.Between(0, cols.length - 1)];
+        cov.fillStyle(c, 0.68);
+        const rx = Phaser.Math.Between(8, 88);
+        const ry = Phaser.Math.Between(8, 56);
+        const rw = Phaser.Math.Between(10, 22);
+        const rh = Phaser.Math.Between(6, 16);
+        cov.fillEllipse(rx, ry, rw, rh);
+      }
+
+      // Silly soldier helmet over the head area (~x=80,y=30 on the sprite)
+      cov.fillStyle(0x4b5e2a, 0.95);
+      cov.fillRoundedRect(68, 10, 28, 12, 4); // cap
+      cov.fillRect(68, 20, 28, 3);            // brim
+      // Chin strap
+      cov.fillStyle(0x2b2f33, 0.9);
+      cov.fillRect(82, 22, 2, 16);
+
+      cov.generateTexture('camo_overlay', 96, 64);
+      cov.destroy();
+    }
     
     // Spray can pickup texture
     {
@@ -963,6 +1025,7 @@ class GameScene extends Phaser.Scene {
     this.attackCooldown = 220;
     this.lastAttackTime = 0;
     this.slowUntil = 0;
+    this.invisibleUntil = 0;
     this.lastDirection = new Phaser.Math.Vector2(1, 0);
     this.sprayUses = 0;
     this.nextAllowedSpawnAt = 0;
@@ -1076,11 +1139,15 @@ class GameScene extends Phaser.Scene {
     this.armorOverlay = this.add.image(this.player.x, this.player.y, 'armor_overlay').setVisible(false);
     this.armorOverlay.setDepth(8).setAlpha(0.7);
 
+    // Camouflage overlay (visible while invisible)
+    this.camoOverlay = this.add.image(this.player.x, this.player.y, 'camo_overlay').setVisible(false);
+    this.camoOverlay.setDepth(9).setAlpha(0.88);
+ 
     // Spray can overlay (shows when holding spray weapon)
     this.sprayCanOverlay = this.add.image(this.player.x, this.player.y, 'spray_can').setVisible(false);
     this.sprayCanOverlay.setDepth(11);
     this.sprayCanOverlay.setScale(0.8);
-
+ 
     // Web slow overlay (visual cue while slowed)
     this.webOverlay = this.add.image(this.player.x, this.player.y, 'web_trap').setVisible(false);
     this.webOverlay.setDepth(12).setScale(0.7).setAlpha(0.6);
@@ -1159,6 +1226,10 @@ class GameScene extends Phaser.Scene {
     this.sprayCans = this.physics.add.group({ allowGravity: false, immovable: true });
     this.physics.add.overlap(this.player, this.sprayCans, this.onPlayerSprayOverlap, null, this);
 
+    // Camouflage pickups
+    this.camoPickups = this.physics.add.group({ allowGravity: false, immovable: true });
+    this.physics.add.overlap(this.player, this.camoPickups, this.onPlayerCamoOverlap, null, this);
+ 
     // Web traps (spider hazards)
     this.webTraps = this.physics.add.group({ allowGravity: false, immovable: true });
     this.physics.add.overlap(this.player, this.webTraps, this.onPlayerWebOverlap, null, this);
@@ -1254,6 +1325,13 @@ class GameScene extends Phaser.Scene {
       this.sprayCanOverlay.setVisible(this.sprayUses > 0);
     }
 
+    // Camouflage overlay follows player while invisible
+    if (this.camoOverlay) {
+      this.camoOverlay.setPosition(this.player.x, this.player.y);
+      this.camoOverlay.setRotation(angle);
+      this.camoOverlay.setVisible(now < (this.invisibleUntil || 0));
+    }
+ 
     // Web slow overlay follows player while slowed
     if (this.webOverlay) {
       this.webOverlay.setPosition(this.player.x, this.player.y);
@@ -1288,11 +1366,19 @@ class GameScene extends Phaser.Scene {
 
     // Enemy AI (behaviors)
     if (this.enemies && !this.isChoosingUpgrade && !this.isGameOver) {
+      const playerInvisible = now < (this.invisibleUntil || 0);
       const ecs = this.enemies.getChildren();
       for (let i = 0; i < ecs.length; i++) {
         const e = ecs[i];
         if (!e || !e.active) continue;
         const type = e.getData && e.getData('type');
+
+        // While camouflaged: enemies that normally target the player wander aimlessly
+        if (playerInvisible && (type === 'enemy_wasp' || type === 'enemy_fly' || type === 'enemy_ant' || type === 'enemy_snake')) {
+          this.updateWanderAI(e, now, type);
+          continue;
+        }
+
         if (type === 'enemy_wasp') {
           this.updateWaspAI(e, now);
         } else if (type === 'enemy_fly' || type === 'enemy_ant') {
@@ -1642,6 +1728,7 @@ class GameScene extends Phaser.Scene {
     this.trySpawnHeart(hx, hy);
     this.trySpawnArmor(hx, hy);
     this.trySpawnSprayCan(hx, hy);
+    this.trySpawnCamoPickup(hx, hy);
 
     this.enemiesDefeated++;
     if (this.killsText) this.killsText.setText('Kills: ' + this.enemiesDefeated);
@@ -2070,6 +2157,54 @@ class GameScene extends Phaser.Scene {
       this.spawnWebTrap(enemy.x, enemy.y);
       const cd = Phaser.Math.Between(this.spiderWebCooldownMin || 1400, this.spiderWebCooldownMax || 2600);
       enemy.setData('nextWebAt', now + cd);
+    }
+  }
+
+  // Generic wanderer used while the player is invisible (mimics spider wandering, no webs)
+  updateWanderAI(enemy, now, type = null) {
+    if (!enemy || !enemy.body) return;
+
+    const t = type || (enemy.getData && enemy.getData('type'));
+    let sp = enemy.getData('speed');
+    if (!sp || sp <= 0) {
+      switch (t) {
+        case 'enemy_wasp':
+          sp = this.shooterMoveSpeed || 100;
+          break;
+        case 'enemy_fly':
+          sp = 100;
+          break;
+        case 'enemy_ant':
+          sp = 140;
+          break;
+        case 'enemy_snake':
+          sp = 100;
+          break;
+        default:
+          sp = 60;
+      }
+    }
+    sp = Math.max(10, Math.floor(sp));
+
+    const nextTurnKey = 'wanderNextTurnAt';
+    const dirKey = 'wanderDirAngle';
+    const nextTurnAt = enemy.getData(nextTurnKey) || 0;
+    if (now >= nextTurnAt) {
+      const prev = enemy.getData(dirKey);
+      const maxTurn = Phaser.Math.DegToRad(this.spiderTurnMaxDeltaDeg != null ? this.spiderTurnMaxDeltaDeg : 35);
+      const delta = Phaser.Math.FloatBetween(-maxTurn, maxTurn);
+      const baseAng = (prev != null) ? prev : Phaser.Math.FloatBetween(-Math.PI, Math.PI);
+      const ang = Phaser.Math.Angle.Wrap(baseAng + delta);
+      enemy.setData(dirKey, ang);
+      enemy.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp);
+      const dt = Phaser.Math.Between(this.spiderTurnIntervalMin || 700, this.spiderTurnIntervalMax || 1600);
+      enemy.setData(nextTurnKey, now + dt);
+    }
+
+    const v = enemy.body.velocity || { x: 0, y: 0 };
+    const vlen = Math.hypot(v.x, v.y);
+    if (vlen > 0.01) {
+      enemy.setRotation(Math.atan2(v.y, v.x) + Math.PI);
     }
   }
 
@@ -2571,6 +2706,34 @@ class GameScene extends Phaser.Scene {
     });
   }
 
+  // Loot: camouflage pickup (grants 5s invisibility)
+  trySpawnCamoPickup(x, y) {
+    if (!this.camoPickups) return;
+    if (Math.random() >= this.camoDropChance) return;
+    const drop = this.camoPickups.create(x, y, 'camo_pickup');
+    drop.setDepth(4);
+    if (drop.body && drop.body.setCircle) {
+      const r = Math.floor(Math.min(drop.width, drop.height) * 0.40);
+      const ox = (drop.width / 2) - r;
+      const oy = (drop.height / 2) - r;
+      drop.body.setCircle(r, ox, oy);
+      drop.body.setAllowGravity(false);
+      drop.body.immovable = true;
+      drop.body.setBounce(0, 0);
+      drop.setVelocity(0, 0);
+    }
+    // Gentle bobbing
+    this.tweens.add({
+      targets: drop,
+      y: drop.y - 6,
+      scale: { from: 1.0, to: 1.06 },
+      duration: 800,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut'
+    });
+  }
+
   onPlayerHeartOverlap(player, heart) {
     if (!heart || !heart.active) return;
     // Heal
@@ -2644,6 +2807,35 @@ class GameScene extends Phaser.Scene {
 
     if (this.sfxOn) this.sfxPickup();
     can.destroy();
+  }
+  
+  onPlayerCamoOverlap(player, camo) {
+    if (!camo || !camo.active) return;
+    const now = this.time.now;
+    // 5 seconds of camouflage invisibility; extend if already active
+    const dur = 5000;
+    this.invisibleUntil = Math.max(this.invisibleUntil || 0, now + dur);
+
+    // Visual feedback: show the camo overlay
+    if (this.camoOverlay) {
+      this.camoOverlay.setVisible(true);
+      this.camoOverlay.setAlpha(0.88);
+    }
+
+    // Pickup FX
+    if (this.sfxOn) this.sfxPickup();
+    const pop = this.add.image(camo.x, camo.y, 'camo_pickup').setDepth(11);
+    this.tweens.add({
+      targets: pop,
+      y: camo.y - 12,
+      scale: 1.2,
+      alpha: 0,
+      duration: 220,
+      ease: 'Quad.easeOut',
+      onComplete: () => pop.destroy()
+    });
+
+    camo.destroy();
   }
   
   // World-bounds collision logging for enemies
