@@ -135,6 +135,14 @@ class GameScene extends Phaser.Scene {
     this.turretMuzzleLen = 22;
     this.isGameOver = false;
 
+    // Boss configuration
+    this.bossSpawnInterval = 15;   // spawn a boss every 15 kills
+    this.bossSpeed = 16;           // super slow
+    this.bossMaxHpBase = 18;       // heavier tank with a lot of health
+    this.bossBarWidth = 38;        // mini health bar above boss
+    this.bossBarHeight = 6;
+    this.bossCornerMargin = 40;    // margin from screen edges for corner spawns
+
     // Debug: facing diagnostics
     this.debugFacing = true;
     this._nextFacingLogAt = 0;
@@ -819,6 +827,45 @@ class GameScene extends Phaser.Scene {
       bg.generateTexture('upgrade_bg', 520, 360);
       bg.destroy();
     }
+
+    // Boss enemy texture (heavy tanky grub with horns)
+    {
+      const bg = this.make.graphics({ x: 0, y: 0, add: false });
+      const W = 80, H = 60;
+      // Segmented body (purple)
+      const segs = 7;
+      bg.fillStyle(0x9b59b6, 1);
+      for (let i = 0; i < segs; i++) {
+        const cx = 10 + i * 10;
+        const rx = 18 + Math.min(i, segs - 1 - i) * 2;
+        bg.fillEllipse(cx + 10, H / 2, rx, 16);
+      }
+      // Dark vertical stripes
+      bg.fillStyle(0x4a235a, 1);
+      for (let i = 0; i < segs; i++) {
+        const cx = 10 + i * 10;
+        bg.fillEllipse(cx + 10, H / 2, 6, 18);
+      }
+      // Head (wider, armored)
+      bg.fillStyle(0x8e44ad, 1);
+      bg.fillEllipse(16, H / 2, 28, 20);
+      // Horns
+      bg.fillStyle(0x4a235a, 1);
+      bg.fillTriangle(6, H / 2, 0, H / 2 - 10, 2, H / 2 - 2);
+      bg.fillTriangle(6, H / 2, 0, H / 2 + 10, 2, H / 2 + 2);
+      // Eye
+      bg.fillStyle(0xffffff, 1);
+      bg.fillCircle(12, H / 2 - 4, 3);
+      bg.fillStyle(0x000000, 1);
+      bg.fillCircle(12, H / 2 - 4, 1.5);
+      // Outline hints
+      bg.lineStyle(1, 0x2e1042, 0.6);
+      bg.strokeEllipse(16, H / 2, 28, 20);
+      bg.strokeEllipse(46, H / 2, 56, 20);
+      // Texture
+      bg.generateTexture('enemy_boss', W, H);
+      bg.destroy();
+    }
   }
 
   init() {
@@ -1017,7 +1064,7 @@ class GameScene extends Phaser.Scene {
     this.physics.add.overlap(this.shelter, this.enemies, this.onShelterEnemyOverlap, null, this);
     this.physics.add.collider(this.enemies, this.shelter, null, (enemyObj, shelterObj) => {
       const t = enemyObj && enemyObj.getData && enemyObj.getData('type');
-      return t === 'enemy_beetle' || t === 'enemy_caterpillar';
+      return t === 'enemy_beetle' || t === 'enemy_caterpillar' || t === 'enemy_boss';
     }, this);
     
     // Projectiles (enemy shots)
@@ -1173,6 +1220,8 @@ class GameScene extends Phaser.Scene {
           this.updateFlyAI(e, now);
         } else if (type === 'enemy_beetle' || type === 'enemy_caterpillar') {
           this.updateTankAI(e, now);
+        } else if (type === 'enemy_boss') {
+          this.updateBossAI(e, now);
         } else if (type === 'enemy_spider') {
           this.updateSpiderAI(e, now);
         }
@@ -1441,6 +1490,12 @@ class GameScene extends Phaser.Scene {
       onComplete: () => pop.destroy()
     });
 
+    // Cleanup boss visuals if present
+    const hpGfx = enemy.getData && enemy.getData('hpGfx');
+    if (hpGfx && hpGfx.destroy) hpGfx.destroy();
+    const aura = enemy.getData && enemy.getData('aura');
+    if (aura && aura.destroy) aura.destroy();
+
     enemy.destroy();
     this.trySpawnHeart(hx, hy);
     this.trySpawnArmor(hx, hy);
@@ -1450,6 +1505,13 @@ class GameScene extends Phaser.Scene {
     if (this.killsText) this.killsText.setText('Kills: ' + this.enemiesDefeated);
     // Recompute difficulty based on new kill count
     this.recomputeDifficulty();
+
+    // Spawn boss on kill milestones (every bossSpawnInterval kills)
+    if (!this.isGameOver && this.enemiesDefeated > 0 && (this.enemiesDefeated % (this.bossSpawnInterval || 15) === 0)) {
+      // Prevent multiple bosses from existing at once
+      const hasBoss = this.enemies.getChildren().some(e => e && e.active && e.getData && e.getData('type') === 'enemy_boss');
+      if (!hasBoss) this.spawnBoss();
+    }
 
     // Post-death spawn delay gate to avoid instant refill
     const now = this.time.now;
@@ -1928,7 +1990,7 @@ class GameScene extends Phaser.Scene {
   onShelterEnemyOverlap(shelter, enemy) {
     if (!enemy || !enemy.active || this.isGameOver) return;
     const t = enemy.getData && enemy.getData('type');
-    if (t !== 'enemy_beetle' && t !== 'enemy_caterpillar') return;
+    if (t !== 'enemy_beetle' && t !== 'enemy_caterpillar' && t !== 'enemy_boss') return;
     const now = this.time.now;
     const next = enemy.getData('nextShelterDamageAt') || 0;
     if (now < next) return;
@@ -2746,6 +2808,9 @@ class GameScene extends Phaser.Scene {
 
     const type = enemy.getData && enemy.getData('type');
 
+    // Boss does not harm the player; it only targets the shelter
+    if (type === 'enemy_boss') return;
+
     // Ants deal 0.5 damage on contact and die instantly
     if (type === 'enemy_ant') {
       const now = this.time.now;
@@ -3017,6 +3082,162 @@ class GameScene extends Phaser.Scene {
     if (bag.length === 0) return 'enemy_fly';
     const idx = Phaser.Math.Between(0, bag.length - 1);
     return bag[idx];
+  }
+  // Boss AI: super slow tank that targets the shelter only
+  updateBossAI(enemy, now) {
+    if (!enemy || !enemy.body || !this.shelter) return;
+
+    const epos = enemy.getCenter();
+    const sx = this.shelter.x;
+    const sy = this.shelter.y;
+    const dir = new Phaser.Math.Vector2(sx - epos.x, sy - epos.y);
+    const dist = dir.length();
+    if (dist > 0.0001) dir.normalize();
+
+    const sp = enemy.getData('speed') || (this.bossSpeed || 16);
+    enemy.setVelocity(dir.x * sp, dir.y * sp);
+    enemy.setRotation(Math.atan2(dir.y, dir.x) + Math.PI);
+
+    // Visuals: keep aura and HP bar aligned
+    const aura = enemy.getData && enemy.getData('aura');
+    if (aura && aura.setPosition) aura.setPosition(enemy.x, enemy.y);
+    this.drawBossHpBar(enemy);
+  }
+
+  // Draw mini health bar above a boss enemy
+  drawBossHpBar(enemy) {
+    const gfx = enemy.getData && enemy.getData('hpGfx');
+    if (!gfx) return;
+
+    const hp = Math.max(0, enemy.getData('hp') != null ? enemy.getData('hp') : 0);
+    const maxHp = Math.max(1, enemy.getData('maxHp') != null ? enemy.getData('maxHp') : hp);
+    const pct = Phaser.Math.Clamp(hp / maxHp, 0, 1);
+
+    const bw = this.bossBarWidth != null ? this.bossBarWidth : 38;
+    const bh = this.bossBarHeight != null ? this.bossBarHeight : 6;
+
+    const x = Math.floor(enemy.x - bw / 2);
+    const yOffset = (enemy.displayHeight ? enemy.displayHeight * 0.6 : 36) + 10;
+    const y = Math.floor(enemy.y - yOffset);
+
+    gfx.clear();
+    // Border/backdrop
+    gfx.fillStyle(0x000000, 0.5);
+    gfx.fillRoundedRect(x - 2, y - 2, bw + 4, bh + 4, 3);
+    // Background
+    gfx.fillStyle(0x10212b, 0.95);
+    gfx.fillRoundedRect(x, y, bw, bh, 3);
+    // Fill
+    const fillColor = pct > 0.66 ? 0x2ecc71 : (pct > 0.33 ? 0xf39c12 : 0xe74c3c);
+    const fillW = Math.max(0, Math.floor(bw * pct));
+    if (fillW > 0) {
+      gfx.fillStyle(fillColor, 1);
+      gfx.fillRoundedRect(x, y, fillW, bh, 3);
+      // Shine
+      gfx.fillStyle(0xffffff, 0.18);
+      gfx.fillRoundedRect(x + 2, y + 1, Math.max(0, fillW - 4), Math.max(1, Math.floor(bh * 0.35)), 2);
+    }
+    gfx.setDepth(12);
+  }
+
+  // Spawn the boss at a random corner, excluding the shelter's corner
+  spawnBoss() {
+    if (this.isGameOver || !this.enemies || !this.shelter) return null;
+
+    // Guard: only one boss at a time
+    const kids = this.enemies.getChildren ? this.enemies.getChildren() : [];
+    for (let i = 0; i < kids.length; i++) {
+      const k = kids[i];
+      if (k && k.active && k.getData && k.getData('type') === 'enemy_boss') {
+        try { console.info('[Boss] spawn skipped; already active'); } catch (e) {}
+        return null;
+      }
+    }
+
+    const margin = this.bossCornerMargin != null ? this.bossCornerMargin : 40;
+    const corners = [
+      { x: margin, y: margin, name: 'tl' },
+      { x: this.worldWidth - margin, y: margin, name: 'tr' },
+      { x: margin, y: this.worldHeight - margin, name: 'bl' },
+      { x: this.worldWidth - margin, y: this.worldHeight - margin, name: 'br' }
+    ];
+
+    // Determine which corner is the shelter's corner (closest)
+    const sx = this.shelter.x;
+    const sy = this.shelter.y;
+    let shelterCornerIdx = 0;
+    let bestD2 = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < corners.length; i++) {
+      const c = corners[i];
+      const dx = c.x - sx;
+      const dy = c.y - sy;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestD2) { bestD2 = d2; shelterCornerIdx = i; }
+    }
+    const pool = corners.filter((_, i) => i !== shelterCornerIdx);
+    const choice = pool[Phaser.Math.Between(0, pool.length - 1)];
+
+    const enemy = this.enemies.create(choice.x, choice.y, 'enemy_boss');
+    enemy.setData('type', 'enemy_boss');
+    enemy.setDepth(4);
+    enemy.setCollideWorldBounds(true);
+    enemy.setBounce(1, 1);
+    // Slightly larger boss for better presence
+    enemy.setScale(1.15);
+
+    if (enemy.body && enemy.body.setCircle) {
+      // Enlarge physics body proportionally to visual scale to keep collisions aligned
+      const base = Math.min(enemy.width, enemy.height);
+      const r = Math.floor(base * 0.40 * 1.15);
+      const ox = enemy.width / 2 - r;
+      const oy = enemy.height / 2 - r;
+      enemy.body.setCircle(r, ox, oy);
+    }
+
+    // Stats
+    const maxHp = this.bossMaxHpBase != null ? this.bossMaxHpBase : 18;
+    enemy.setData('hp', maxHp);
+    enemy.setData('maxHp', maxHp);
+    enemy.setData('contactDamage', 3); // damage to shelter when overlapping
+    const sp = this.bossSpeed != null ? this.bossSpeed : 16;
+    enemy.setData('speed', sp);
+
+    // Aura visual to mark as boss
+    const aura = this.add.image(enemy.x, enemy.y, 'upgrade_glow')
+      .setTint(0xff66aa)
+      .setAlpha(0.45)
+      .setScale(0.7)
+      .setDepth(enemy.depth - 0.1);
+    this.tweens.add({
+      targets: aura,
+      alpha: { from: 0.35, to: 0.65 },
+      scale: { from: 0.6, to: 0.9 },
+      duration: 700,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut'
+    });
+    enemy.setData('aura', aura);
+
+    // HP bar graphics
+    const hpGfx = this.add.graphics().setDepth(12);
+    enemy.setData('hpGfx', hpGfx);
+
+    // Initial heading toward shelter
+    const epos = enemy.getCenter();
+    const dir = new Phaser.Math.Vector2(sx - epos.x, sy - epos.y);
+    const dist = dir.length();
+    if (dist > 0.0001) dir.normalize();
+    enemy.setVelocity(dir.x * sp, dir.y * sp);
+    enemy.setRotation(Math.atan2(dir.y, dir.x) + Math.PI);
+
+    this.drawBossHpBar(enemy);
+
+    try {
+      console.info('[Boss] spawned', { at: { x: Math.round(enemy.x), y: Math.round(enemy.y) }, hp: maxHp, speed: sp });
+    } catch (e) {}
+
+    return enemy;
   }
 }
  
