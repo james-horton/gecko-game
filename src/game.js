@@ -97,8 +97,12 @@ class GameScene extends Phaser.Scene {
     this.shelterRange = this.shelterRangeBase;
     this.shelterShootCooldown = this.shelterShootCooldownBase;
     this.nextShelterShotAt = 0;
-    this.shelterProjectileSpeed = 340;
+    this.shelterProjectileSpeed = 50;
     this.shelterProjectileDamage = 1;
+    // Turret visuals (separate rotating head unlocked at level >= 2)
+    this.shelterTurret = null;
+    this.shelterTurretOffset = new Phaser.Math.Vector2(0, -12);
+    this.turretMuzzleLen = 22;
     this.isGameOver = false;
 
     // Debug: facing diagnostics
@@ -192,7 +196,7 @@ class GameScene extends Phaser.Scene {
       s.destroy();
     }
 
-    // Shelter (level 2) fortified texture with roof turret
+    // Shelter (level 2) fortified texture without turret (turret will be a separate animated sprite)
     {
       const s2 = this.make.graphics({ x: 0, y: 0, add: false });
       // Roof (reinforced)
@@ -207,17 +211,32 @@ class GameScene extends Phaser.Scene {
       // Door
       s2.fillStyle(0x0a0a0a, 1);
       s2.fillRoundedRect(32 - 6, 28, 12, 16, 2);
-      // Turret block and barrel
-      s2.fillStyle(0xaab7c4, 1);
-      s2.fillRoundedRect(28, 10, 8, 6, 2);
-      s2.fillStyle(0x88e0ff, 1);
-      s2.fillRect(36, 12, 12, 2);
       // Outlines
       s2.lineStyle(2, 0x000000, 0.28);
       s2.strokeTriangle(4, 22, 60, 22, 32, 4);
       s2.strokeRoundedRect(8, 22, 48, 24, 4);
       s2.generateTexture('shelter_home_lv2', 64, 48);
       s2.destroy();
+    }
+
+    // Shelter turret head texture (separate sprite; points to the right at angle 0)
+    {
+      const t = this.make.graphics({ x: 0, y: 0, add: false });
+      // Base block
+      t.fillStyle(0xaab7c4, 1);
+      t.fillRoundedRect(2, 6, 10, 8, 2);
+      // Barrel
+      t.fillStyle(0x88e0ff, 1);
+      t.fillRect(12, 9, 14, 2);
+      // Small muzzle cap
+      t.fillStyle(0xb0ecff, 1);
+      t.fillRect(26, 8, 2, 4);
+      // Outline
+      t.lineStyle(1, 0x2b4f5f, 0.8);
+      t.strokeRoundedRect(2.5, 6.5, 9, 7, 2);
+      t.strokeRect(12.5, 9.5, 13, 1);
+      t.generateTexture('shelter_turret_head', 30, 20);
+      t.destroy();
     }
 
     // Ally projectile (turret bolt)
@@ -694,7 +713,7 @@ class GameScene extends Phaser.Scene {
     this.shelterRange = this.shelterRangeBase;
     this.shelterShootCooldown = this.shelterShootCooldownBase;
     this.nextShelterShotAt = 0;
-    this.shelterProjectileSpeed = 340;
+    this.shelterProjectileSpeed = 50;
     this.shelterProjectileDamage = 1;
     this.isGameOver = false;
 
@@ -707,6 +726,7 @@ class GameScene extends Phaser.Scene {
     this.shelter = null;
     this.shelterHealthGfx = null;
     this.shelterHealthText = null;
+    this.shelterTurret = null;
 
     console.info('[Scene] init() reset', {
       before,
@@ -752,6 +772,17 @@ class GameScene extends Phaser.Scene {
     // Shelter (home base) - static
     this.shelter = this.physics.add.staticImage(120, this.worldHeight - 100, 'shelter_home');
     this.shelter.setDepth(3);
+    // Animated turret head (hidden until shelter upgrades to level 2)
+    this.shelterTurret = this.add.image(
+      this.shelter.x + (this.shelterTurretOffset ? this.shelterTurretOffset.x : 0),
+      this.shelter.y + (this.shelterTurretOffset ? this.shelterTurretOffset.y : -12),
+      'shelter_turret_head'
+    ).setDepth(7).setVisible(false);
+    this.shelterTurret.setOrigin(0.18, 0.5);
+    // Compute muzzle length so projectiles spawn at the barrel tip regardless of origin/scale
+    // Texture is 30px wide, muzzle cap around ~93% of width; originX is 0.18 (≈5.4px from left).
+    // Using displayWidth keeps this correct if we ever scale the turret head.
+    this.turretMuzzleLen = Math.max(10, this.shelterTurret.displayWidth * (0.93 - this.shelterTurret.originX));
 
     // Player
     this.player = this.physics.add.sprite(this.worldWidth / 2, this.worldHeight / 2, 'chameleon');
@@ -981,6 +1012,8 @@ class GameScene extends Phaser.Scene {
 
     // Shelter turret defense
     if (this.shelterHasTurret && this.shelter && this.enemies && !this.isChoosingUpgrade && !this.isGameOver) {
+      // Always aim the turret at the nearest enemy, even when not firing
+      this.updateShelterTurretAim(now);
       this.updateShelterDefense(now);
     }
 
@@ -1344,16 +1377,12 @@ class GameScene extends Phaser.Scene {
     return proj;
   }
 
-  updateShelterDefense(now) {
-    if (!this.shelter || !this.enemies || this.isChoosingUpgrade || this.isGameOver) return;
-    if (!this.shelterHasTurret) return;
-    if (now < (this.nextShelterShotAt || 0)) return;
-
+  // Find closest enemy in turret range (returns { target, tc, sx, sy } or null)
+  findShelterTarget() {
+    if (!this.shelter || !this.enemies) return null;
+    const range = this.shelterRange || 240;
     const sx = this.shelter.x;
     const sy = this.shelter.y;
-    const range = this.shelterRange || 240;
-
-    // Find closest enemy within range
     const cs = this.enemies.getChildren ? this.enemies.getChildren() : [];
     let target = null;
     let bestD2 = Number.POSITIVE_INFINITY;
@@ -1369,16 +1398,50 @@ class GameScene extends Phaser.Scene {
         target = e;
       }
     }
-    if (!target) return;
-
+    if (!target) return null;
     const tc = target.getCenter();
-    const spawnOffset = new Phaser.Math.Vector2(0, -12); // above roof
-    const startX = sx + spawnOffset.x;
-    const startY = sy + spawnOffset.y;
-    const dir = new Phaser.Math.Vector2(tc.x - startX, tc.y - startY);
-    if (dir.lengthSq() === 0) return;
-    dir.normalize();
+    return { target, tc, sx, sy };
+  }
 
+  // Rotate the turret head to track the nearest enemy target (visible at level >= 2)
+  updateShelterTurretAim(now) {
+    if (!this.shelterHasTurret || !this.shelterTurret) return;
+    const found = this.findShelterTarget();
+    // Keep turret attached to shelter roof
+    const baseX = this.shelter.x + (this.shelterTurretOffset ? this.shelterTurretOffset.x : 0);
+    const baseY = this.shelter.y + (this.shelterTurretOffset ? this.shelterTurretOffset.y : -12);
+    this.shelterTurret.setPosition(baseX, baseY);
+    if (!found) return;
+    const ang = Math.atan2(found.tc.y - baseY, found.tc.x - baseX);
+    this.shelterTurret.setRotation(ang);
+  }
+
+  // Fire from the turret when off cooldown, using the turret head muzzle position
+  updateShelterDefense(now) {
+    if (!this.shelter || !this.enemies || this.isChoosingUpgrade || this.isGameOver) return;
+    if (!this.shelterHasTurret) return;
+    if (now < (this.nextShelterShotAt || 0)) return;
+
+    const found = this.findShelterTarget();
+    if (!found) return;
+
+    // Compute muzzle world position from turret head if available
+    const baseX = this.shelter.x + (this.shelterTurretOffset ? this.shelterTurretOffset.x : 0);
+    const baseY = this.shelter.y + (this.shelterTurretOffset ? this.shelterTurretOffset.y : -12);
+    const ang = Math.atan2(found.tc.y - baseY, found.tc.x - baseX);
+    const muzzleLen = this.turretMuzzleLen != null ? this.turretMuzzleLen : 14;
+    const startX = baseX + Math.cos(ang) * muzzleLen;
+    const startY = baseY + Math.sin(ang) * muzzleLen;
+    try {
+      console.debug('[Turret] fire spawn', {
+        baseX: Math.round(baseX), baseY: Math.round(baseY),
+        angDeg: Math.round(ang * 180 / Math.PI),
+        muzzleLen,
+        startX: Math.round(startX), startY: Math.round(startY)
+      });
+    } catch (err) {}
+
+    const dir = new Phaser.Math.Vector2(Math.cos(ang), Math.sin(ang));
     this.spawnAllyProjectile(startX, startY, dir);
     this.nextShelterShotAt = now + (this.shelterShootCooldown || 1000);
 
@@ -1430,6 +1493,16 @@ class GameScene extends Phaser.Scene {
         this.shelterProjectileDamage = Math.min(5, (this.shelterProjectileDamage || 1) + 1);
       }
       this.nextShelterShotAt = 0;
+
+      // Reveal/position animated turret head
+      if (this.shelterTurret) {
+        this.shelterTurret.setVisible(true);
+        this.shelterTurret.setPosition(
+          this.shelter.x + (this.shelterTurretOffset ? this.shelterTurretOffset.x : 0),
+          this.shelter.y + (this.shelterTurretOffset ? this.shelterTurretOffset.y : -12)
+        );
+        this.shelterTurret.setRotation(0);
+      }
     }
 
     // Swap to fortified visual
