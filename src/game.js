@@ -18,7 +18,7 @@ class GameScene extends Phaser.Scene {
     this.waspsUnlocked = false;     // locked until threshold
     this.maxActiveWasps = 3;        // cap simultaneous wasps
     // Spawn gating
-    this.postKillSpawnDelayMs = 2000;
+    this.postKillSpawnDelayMs = 1500;
     this.nextAllowedSpawnAt = 0;
     // Loot / pickups
     this.hearts = null;
@@ -99,7 +99,7 @@ class GameScene extends Phaser.Scene {
     this.nextShelterShotAt = 0;
     this.shelterProjectileSpeed = 50;
     this.shelterProjectileDamage = 1;
-    // Turret visuals (separate rotating head unlocked at level >= 2)
+    // Turret visuals (separate rotating head unlocked at level >= 3)
     this.shelterTurret = null;
     this.shelterTurretOffset = new Phaser.Math.Vector2(0, -12);
     this.turretMuzzleLen = 22;
@@ -772,7 +772,7 @@ class GameScene extends Phaser.Scene {
     // Shelter (home base) - static
     this.shelter = this.physics.add.staticImage(120, this.worldHeight - 100, 'shelter_home');
     this.shelter.setDepth(3);
-    // Animated turret head (hidden until shelter upgrades to level 2)
+    // Animated turret head (hidden until shelter upgrades to level 3)
     this.shelterTurret = this.add.image(
       this.shelter.x + (this.shelterTurretOffset ? this.shelterTurretOffset.x : 0),
       this.shelter.y + (this.shelterTurretOffset ? this.shelterTurretOffset.y : -12),
@@ -1014,6 +1014,7 @@ class GameScene extends Phaser.Scene {
     if (this.shelterHasTurret && this.shelter && this.enemies && !this.isChoosingUpgrade && !this.isGameOver) {
       // Always aim the turret at the nearest enemy, even when not firing
       this.updateShelterTurretAim(now);
+      this.debugTurretGateTick(now);
       this.updateShelterDefense(now);
     }
 
@@ -1418,12 +1419,48 @@ class GameScene extends Phaser.Scene {
 
   // Fire from the turret when off cooldown, using the turret head muzzle position
   updateShelterDefense(now) {
-    if (!this.shelter || !this.enemies || this.isChoosingUpgrade || this.isGameOver) return;
-    if (!this.shelterHasTurret) return;
-    if (now < (this.nextShelterShotAt || 0)) return;
+    // Gating + diagnostics
+    if (!this.shelter || !this.enemies || this.isChoosingUpgrade || this.isGameOver) {
+      try {
+        console.debug('[Turret] gate skip', {
+          reason: 'disabled_or_missing',
+          hasShelter: !!this.shelter,
+          hasEnemies: !!this.enemies,
+          isChoosingUpgrade: this.isChoosingUpgrade,
+          isGameOver: this.isGameOver
+        });
+      } catch (err) {}
+      return;
+    }
+    if (!this.shelterHasTurret) {
+      try {
+        console.debug('[Turret] gate skip', { reason: 'no_turret', level: this.shelterLevel });
+      } catch (err) {}
+      return;
+    }
+    // Require level 3 to actually fire; level 2 only shows/aims the turret head
+    if (this.shelterLevel < 3) {
+      try {
+        console.debug('[Turret] gate level', { level: this.shelterLevel, requires: 3 });
+      } catch (err) {}
+      return;
+    }
+    if (now < (this.nextShelterShotAt || 0)) {
+      try {
+        console.debug('[Turret] gate cooldown', {
+          now,
+          nextAt: this.nextShelterShotAt,
+          msRemaining: (this.nextShelterShotAt || 0) - now
+        });
+      } catch (err) {}
+      return;
+    }
 
     const found = this.findShelterTarget();
-    if (!found) return;
+    if (!found) {
+      try { console.debug('[Turret] gate no-target'); } catch (err) {}
+      return;
+    }
 
     // Compute muzzle world position from turret head if available
     const baseX = this.shelter.x + (this.shelterTurretOffset ? this.shelterTurretOffset.x : 0);
@@ -1463,6 +1500,23 @@ class GameScene extends Phaser.Scene {
     if (this.sfxOn) this.sfxShelterShot();
   }
 
+  // Turret gate diagnostics (throttled)
+  debugTurretGateTick(now) {
+    if (now < (this._nextTurretGateLogAt || 0)) return;
+    this._nextTurretGateLogAt = now + 1000;
+    try {
+      const enemyCount = (this.enemies && this.enemies.getChildren) ? this.enemies.getChildren().filter(e => e && e.active).length : 0;
+      console.debug('[Turret] gate', {
+        level: this.shelterLevel,
+        hasTurret: this.shelterHasTurret,
+        now,
+        nextShelterShotAt: this.nextShelterShotAt,
+        cooldownRemaining: Math.max(0, (this.nextShelterShotAt || 0) - now),
+        enemyCount
+      });
+    } catch (err) {}
+  }
+
   onEnemyHitByAllyProjectile(enemy, proj) {
     if (!enemy || !enemy.active || !proj || !proj.active) return;
     this.hitEmitter.explode(Phaser.Math.Between(4, 6), enemy.x, enemy.y);
@@ -1480,8 +1534,9 @@ class GameScene extends Phaser.Scene {
     this.shelterHealth = this.shelterMaxHealth;
     this.updateShelterUI();
 
-    // Activate turret from level 2 onward and scale a bit with higher levels
+    // Activate turret system from level 2; show visuals and enable firing at level >= 3; scale a bit with higher levels
     if (this.shelterLevel >= 2) {
+      const prevNextShot = this.nextShelterShotAt || null;
       this.shelterHasTurret = true;
       // Improvements kick in from level 3 onward; level 2 uses baseline
       const improve = Math.max(0, this.shelterLevel - 2);
@@ -1492,11 +1547,25 @@ class GameScene extends Phaser.Scene {
       if (this.shelterLevel >= 3) {
         this.shelterProjectileDamage = Math.min(5, (this.shelterProjectileDamage || 1) + 1);
       }
-      this.nextShelterShotAt = 0;
+      this.nextShelterShotAt = 0; // Armed schedule; firing gated until level >= 3
 
-      // Reveal/position animated turret head
+      // Diagnostics: confirm activation and schedule
+      try {
+        console.info('[Turret] activated', {
+          level: this.shelterLevel,
+          baseRange,
+          baseCd,
+          range: this.shelterRange,
+          shootCooldown: this.shelterShootCooldown,
+          prevNextShot,
+          nextNextShot: this.nextShelterShotAt,
+          timeNow: this.time.now
+        });
+      } catch (err) {}
+
+      // Position turret head; visible only when it can fire (level >= 3)
       if (this.shelterTurret) {
-        this.shelterTurret.setVisible(true);
+        this.shelterTurret.setVisible(this.shelterLevel >= 3);
         this.shelterTurret.setPosition(
           this.shelter.x + (this.shelterTurretOffset ? this.shelterTurretOffset.x : 0),
           this.shelter.y + (this.shelterTurretOffset ? this.shelterTurretOffset.y : -12)
