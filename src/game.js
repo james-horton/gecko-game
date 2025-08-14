@@ -92,7 +92,8 @@ class GameScene extends Phaser.Scene {
     this.bossMinDistFromPlayer = 200;
 
     // Combat / Health
-    this.maxHealth = 5;
+    this.baseMaxHealth = 5;
+    this.maxHealth = this.baseMaxHealth;
     this.health = this.maxHealth;
     this.invulnDuration = 800; // ms of invulnerability after a hit
     this.invulnUntil = 0;
@@ -113,6 +114,8 @@ class GameScene extends Phaser.Scene {
     this.heartTexH = 0;
     this.heartScale = 0.6;
     this.heartSpacing = 4;
+    // Extra heart (upgrade) tint color (match shelter health bar blue)
+    this.extraHeartTint = 0x2e86c1;
 
     // Visual polish
     this.bg = null;
@@ -804,6 +807,20 @@ class GameScene extends Phaser.Scene {
       hg.destroy();
     }
 
+// Heart UI (white) texture for HUD extra hearts (tint-safe)
+    {
+      const hu = this.make.graphics({ x: 0, y: 0, add: false });
+      hu.fillStyle(0xffffff, 1);
+      // Two circles + triangle to match heart_pickup silhouette
+      hu.fillCircle(10, 9, 8);
+      hu.fillCircle(20, 9, 8);
+      hu.fillTriangle(2, 13, 28, 13, 16, 28);
+      // Subtle gloss highlight band
+      hu.fillStyle(0xffffff, 0.24);
+      hu.fillEllipse(12, 8, 8, 4);
+      hu.generateTexture('heart_ui', 32, 32);
+      hu.destroy();
+    }
     // Armor pickup (chainmail icon)
     {
       const ag = this.make.graphics({ x: 0, y: 0, add: false });
@@ -1011,7 +1028,8 @@ class GameScene extends Phaser.Scene {
     };
 
     // Baseline values
-    this.maxHealth = 5;
+    this.baseMaxHealth = 5;
+    this.maxHealth = this.baseMaxHealth;
     this.health = this.maxHealth;
     this.isDead = false;
     this.hasArmor = false;
@@ -2953,9 +2971,10 @@ class GameScene extends Phaser.Scene {
 
   getRandomUpgrades(count) {
     const all = [
-      { type: 'speed', value: 60, description: 'Increased Movement Speed\n+60 speed' },
-      { type: 'tongue', value: 80, description: 'Longer Tongue\n+80 range' },
-      { type: 'attack', value: 0.25, description: 'Faster Attacks\n-25% cooldown' }
+      { type: 'speed', value: 60, description: 'Faster Movement Speed' },
+      { type: 'tongue', value: 80, description: 'Longer Tongue' },
+      { type: 'attack', value: 0.25, description: 'Faster Attack' },
+      { type: 'max_health', value: 3, description: 'More Health' }
     ];
     // Offer shelter upgrade if not at max level
     if ((this.shelterLevel || 1) < (this.maxShelterLevel || 3)) {
@@ -2983,6 +3002,11 @@ class GameScene extends Phaser.Scene {
         break;
       case 'attack':
         this.attackCooldown = Math.max(80, Math.floor(this.attackCooldown * (1 - up.value)));
+        break;
+      case 'max_health':
+        this.maxHealth += (up.value != null ? up.value : 1);
+        this.health = this.maxHealth;
+        this.updateHealthUI();
         break;
       case 'shelter_upgrade':
         this.handleShelterUpgrade(up);
@@ -3189,9 +3213,18 @@ class GameScene extends Phaser.Scene {
           .setScale(this.heartScale || 0.6)
           .setTint(0x444444)
           .setAlpha(0.45);
-        const fg = this.add.image(x, 0, 'heart_pickup')
+
+        // Use a white UI heart for extra slots so blue tint isn't darkened by red base
+        const heartIndex = i + 1;
+        const isExtra = heartIndex > (this.baseMaxHealth != null ? this.baseMaxHealth : 5);
+        const fgKey = isExtra ? 'heart_ui' : 'heart_pickup';
+        const fg = this.add.image(x, 0, fgKey)
           .setOrigin(0, 0)
           .setScale(this.heartScale || 0.6);
+        if (isExtra) {
+          fg.setTint(this.extraHeartTint != null ? this.extraHeartTint : 0x2e86c1);
+        }
+
         this.healthHeartsContainer.add(bg);
         this.healthHeartsContainer.add(fg);
         this.healthHeartSlots.push({ bg, fg });
@@ -3206,17 +3239,20 @@ class GameScene extends Phaser.Scene {
     for (let i = 0; i < this.healthHeartSlots.length; i++) {
       const { fg } = this.healthHeartSlots[i];
       const heartIndex = i + 1; // 1-based
+      const isExtra = heartIndex > (this.baseMaxHealth != null ? this.baseMaxHealth : 5);
+      const tintBlue = this.extraHeartTint != null ? this.extraHeartTint : 0x4da3ff;
+
       if (hp >= heartIndex) {
         // full
         if (fg.setCrop) fg.setCrop(0, 0, fullW, fullH);
         fg.setVisible(true);
-        fg.clearTint();
+        if (isExtra) { fg.setTint(tintBlue); } else { fg.clearTint(); }
         fg.setAlpha(1);
       } else if (hp >= heartIndex - 0.5) {
         // half (left half)
         if (fg.setCrop) fg.setCrop(0, 0, Math.ceil(fullW / 2), fullH);
         fg.setVisible(true);
-        fg.clearTint();
+        if (isExtra) { fg.setTint(tintBlue); } else { fg.clearTint(); }
         fg.setAlpha(1);
       } else {
         // empty: hide foreground; background remains grey
