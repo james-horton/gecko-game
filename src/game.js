@@ -657,7 +657,69 @@ class GameScene extends Phaser.Scene {
       makeSpider('enemy_spider_1', 1);
       makeSpider('enemy_spider_2', -1);
     }
-
+ 
+    // Enemies: snake (rainbow slithering chaser)
+    {
+      const sg = this.make.graphics({ x: 0, y: 0, add: false });
+      const W = 80, H = 26;
+      // Build a rainbow body using colored bands
+      const bands = [
+        0xff3b30, 0xff9500, 0xffcc00, 0x34c759, 0x007aff, 0x5856d6, 0xaf52de
+      ];
+      // Base silhouette
+      sg.fillStyle(0x000000, 0);
+      sg.fillRect(0, 0, W, H);
+      // Body shape: series of overlapping ellipses to form a rounded tube
+      for (let i = 0; i < bands.length; i++) {
+        const c = bands[i];
+        sg.fillStyle(c, 1);
+        const t = i / (bands.length - 1);
+        const cx = 10 + t * 58;
+        const rY = 8 + Math.sin(t * Math.PI) * 2.5;
+        sg.fillEllipse(cx, H / 2, 20, rY * 2);
+      }
+      // Head (slightly bigger ellipse)
+      sg.fillStyle(0xffcc00, 1);
+      sg.fillEllipse(12, H / 2, 18, 14);
+      // Eye
+      sg.fillStyle(0xffffff, 1);
+      sg.fillCircle(8, H / 2 - 3, 2.4);
+      sg.fillStyle(0x000000, 1);
+      sg.fillCircle(8, H / 2 - 3, 1.2);
+      // Subtle outline
+      sg.lineStyle(1, 0x111111, 0.6);
+      sg.strokeEllipse(40, H / 2, 64, 18);
+      sg.strokeEllipse(12, H / 2, 18, 14);
+      sg.generateTexture('enemy_snake', W, H);
+      sg.destroy();
+    }
+ 
+    // Stun stars overlay
+    {
+      const st = this.make.graphics({ x: 0, y: 0, add: false });
+      const W = 36, H = 36;
+      st.clear();
+      // Stars
+      const star = (cx, cy, r, color) => {
+        st.fillStyle(color, 1);
+        for (let i = 0; i < 5; i++) {
+          const a1 = (i * 2 * Math.PI) / 5 - Math.PI / 2;
+          const a2 = a1 + Math.PI / 5;
+          const x1 = cx + Math.cos(a1) * r;
+          const y1 = cy + Math.sin(a1) * r;
+          const x2 = cx + Math.cos(a2) * (r * 0.5);
+          const y2 = cy + Math.sin(a2) * (r * 0.5);
+          st.fillTriangle(cx, cy, x1, y1, x2, y2);
+        }
+      };
+      star(W * 0.35, H * 0.35, 8, 0xfff59d);
+      star(W * 0.65, H * 0.6, 6, 0xffeb3b);
+      st.fillStyle(0xffffff, 0.16);
+      st.fillCircle(W / 2, H / 2, 14);
+      st.generateTexture('stun_stars', W, H);
+      st.destroy();
+    }
+ 
     // Web trap (static)
     {
       const w = this.make.graphics({ x: 0, y: 0, add: false });
@@ -1015,6 +1077,9 @@ class GameScene extends Phaser.Scene {
     // Web slow overlay (visual cue while slowed)
     this.webOverlay = this.add.image(this.player.x, this.player.y, 'web_trap').setVisible(false);
     this.webOverlay.setDepth(12).setScale(0.7).setAlpha(0.6);
+    // Stun overlay (visual cue while stunned)
+    this.stunOverlay = this.add.image(this.player.x, this.player.y - 8, 'stun_stars').setVisible(false);
+    this.stunOverlay.setDepth(13).setScale(0.9).setAlpha(0.9);
     
     // Input
     this.cursors = this.input.keyboard.createCursorKeys();
@@ -1144,6 +1209,7 @@ class GameScene extends Phaser.Scene {
     if (!this.player) return;
 
     const now = this.time.now;
+    const stunned = now < (this.stunUntil || 0);
    
     // Movement
     const speed = this.isDead ? 0 : this.getCurrentSpeed(now);
@@ -1187,6 +1253,12 @@ class GameScene extends Phaser.Scene {
       this.webOverlay.setRotation(angle);
       this.webOverlay.setVisible(now < this.slowUntil);
     }
+    // Stun overlay follows player while stunned
+    if (this.stunOverlay) {
+      this.stunOverlay.setPosition(this.player.x, this.player.y - 8);
+      this.stunOverlay.setRotation(now * 0.012);
+      this.stunOverlay.setVisible(stunned);
+    }
     
     // Invulnerability blink
     const inv = now < this.invulnUntil;
@@ -1196,7 +1268,7 @@ class GameScene extends Phaser.Scene {
     }
     
     // Attack input (space)
-    if (Phaser.Input.Keyboard.JustDown(this.spaceKey) && !this.isChoosingUpgrade && !this.isDead) {
+    if (Phaser.Input.Keyboard.JustDown(this.spaceKey) && !this.isChoosingUpgrade && !this.isDead && !stunned) {
       if (now - this.lastAttackTime >= this.attackCooldown) {
         this.lastAttackTime = now;
         if (this.sprayUses > 0) {
@@ -1222,6 +1294,8 @@ class GameScene extends Phaser.Scene {
           this.updateTankAI(e, now);
         } else if (type === 'enemy_boss') {
           this.updateBossAI(e, now);
+        } else if (type === 'enemy_snake') {
+          this.updateSnakeAI(e, now);
         } else if (type === 'enemy_spider') {
           this.updateSpiderAI(e, now);
         }
@@ -1931,9 +2005,41 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  // Return current movement speed, considering slow debuffs
+  // Snake: slithering chaser with sine wiggle; retreats while player is stunned by it
+  updateSnakeAI(enemy, now) {
+    if (!enemy || !enemy.body || !this.player) return;
+    const p = this.player.getCenter();
+    const epos = enemy.getCenter();
+    const dx = p.x - epos.x;
+    const dy = p.y - epos.y;
+    const dist = Math.hypot(dx, dy);
+    let dirX = 0, dirY = 0;
+    if (dist > 0.0001) {
+      dirX = dx / dist;
+      dirY = dy / dist;
+    }
+    // If this snake has recently stunned the player, back away until timer expires
+    const avoid = now < (enemy.getData('avoidUntil') || 0);
+    if (avoid) {
+      dirX = -dirX;
+      dirY = -dirY;
+    }
+    // Wiggle by oscillating the heading angle
+    const baseAng = Math.atan2(dirY, dirX);
+    const phase = (enemy.getData('phase') || 0) + now * 0.006 * (enemy.getData('wiggleSpeed') || 2);
+    const wiggleDeg = enemy.getData('wiggleDeg') != null ? enemy.getData('wiggleDeg') : 22;
+    const ang = baseAng + Math.sin(phase) * Phaser.Math.DegToRad(wiggleDeg);
+    const sp = enemy.getData('speed') || 140;
+    enemy.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp);
+    enemy.setRotation(ang + Math.PI);
+  }
+
+  // Return current movement speed, considering slow and stun debuffs
   getCurrentSpeed(now) {
     const base = this.speed || 0;
+    if (now < (this.stunUntil || 0)) {
+      return 0;
+    }
     if (now < (this.slowUntil || 0)) {
       const mult = this.slowMultiplier != null ? this.slowMultiplier : 0.5;
       return Math.floor(base * mult);
@@ -2199,7 +2305,7 @@ class GameScene extends Phaser.Scene {
       contactDamage = 0.5;
       const baseSp = Phaser.Math.Between(180, 200);
       const sp = Math.max(10, baseSp); // do not scale with enemySpeedScale
-      const maxAntSpeed = 210; // stay a bit below baseline player speed (220) regardless of upgrades
+      const maxAntSpeed = 150; // stay a bit below baseline player speed (220) regardless of upgrades
       const finalSp = Math.min(sp, maxAntSpeed);
       enemy.setData('speed', finalSp);
       const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
@@ -2212,6 +2318,52 @@ class GameScene extends Phaser.Scene {
         repeat: -1,
         ease: 'Sine.easeInOut'
       });
+    } else if (type === 'enemy_snake') {
+      // Rainbow snake: moderate-speed chaser that stuns and then retreats
+      hp = 1;
+      contactDamage = 0.5;
+      const sp = 100; // moderate speed
+      enemy.setData('speed', sp);
+      // Randomize wiggle characteristics
+      enemy.setData('phase', Phaser.Math.FloatBetween(0, Math.PI * 2));
+      enemy.setData('wiggleSpeed', Phaser.Math.FloatBetween(1.6, 2.6));
+      enemy.setData('wiggleDeg', 22);
+      // Visual scale: make snake ~65% size and adjust hitbox
+      const snakeScale = 0.65;
+      enemy.setScale(snakeScale);
+      // Recompute circular physics body to match scaled visual
+      if (enemy.body && enemy.body.setCircle) {
+        const base = Math.min(enemy.width, enemy.height);
+        const r = Math.floor(base * (this.enemyBodyRadiusFactor || 0.36) * snakeScale);
+        const ox = enemy.width / 2 - r;
+        const oy = enemy.height / 2 - r;
+        enemy.body.setCircle(r, ox, oy);
+      }
+      // Start heading toward player initially
+      if (this.player) {
+        const pc = this.player.getCenter();
+        const ec = enemy.getCenter();
+        const dx = pc.x - ec.x, dy = pc.y - ec.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        const nx = dx / dist, ny = dy / dist;
+        enemy.setVelocity(nx * sp, ny * sp);
+        enemy.setRotation(Math.atan2(ny, nx) + Math.PI);
+      } else {
+        const a = Phaser.Math.FloatBetween(0, Math.PI * 2);
+        enemy.setVelocity(Math.cos(a) * sp, Math.sin(a) * sp);
+        enemy.setRotation(a + Math.PI);
+      }
+      // Subtle slither scale
+      this.tweens.add({
+        targets: enemy,
+        scaleY: { from: snakeScale * 0.96, to: snakeScale * 1.04 },
+        scaleX: { from: snakeScale * 1.02, to: snakeScale * 0.98 },
+        duration: 360,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut'
+      });
+      enemy.setBounce(1, 1);
     } else if (type === 'enemy_spider') {
       hp = 1;
       contactDamage = this.spiderContactDamage != null ? this.spiderContactDamage : 1;
@@ -2811,6 +2963,33 @@ class GameScene extends Phaser.Scene {
     // Boss does not harm the player; it only targets the shelter
     if (type === 'enemy_boss') return;
 
+    // Rainbow snake: 0.5 dmg + stun; then backs away until stun ends
+    if (type === 'enemy_snake') {
+      const now = this.time.now;
+      // Apply stun regardless of i-frames to enforce the control effect
+      const stunMs = 1100;
+      this.stunUntil = Math.max(this.stunUntil || 0, now + stunMs);
+      // Tag this snake to avoid the player until stun expires
+      enemy.setData('avoidUntil', now + stunMs);
+      // Push initial movement away immediately
+      if (enemy.body) {
+        const pc = this.player.getCenter();
+        const ec = enemy.getCenter();
+        const dx = ec.x - pc.x, dy = ec.y - pc.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        const nx = dx / dist, ny = dy / dist;
+        const sp = enemy.getData('speed') || 140;
+        enemy.setVelocity(nx * sp, ny * sp);
+        enemy.setRotation(Math.atan2(ny, nx) + Math.PI);
+      }
+      // Damage (respects armor/invuln as usual)
+      this.takeDamage(0.5, enemy);
+      // FX
+      if (this.hitEmitter) this.hitEmitter.explode(Phaser.Math.Between(6, 10), enemy.x, enemy.y);
+      if (this.sfxOn) this.sfxHit();
+      return;
+    }
+
     // Ants deal 0.5 damage on contact and die instantly
     if (type === 'enemy_ant') {
       const now = this.time.now;
@@ -3068,6 +3247,9 @@ class GameScene extends Phaser.Scene {
     } else {
       weights.enemy_ant = 3;
     }
+    // Add snake weights (moderate-speed chaser that stuns)
+    const snakeWeight = (k < 5) ? 0 : (k < 10) ? 1 : (k < 16) ? 2 : (k < 24) ? 2 : 3;
+    weights.enemy_snake = (weights.enemy_snake || 0) + snakeWeight;
     // Add spider weights (random wanderers that lay webs)
     const spiderWeight = (k < 5) ? 1 : (k < 16) ? 2 : 3;
     weights.enemy_spider = (weights.enemy_spider || 0) + spiderWeight;
