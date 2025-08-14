@@ -1429,6 +1429,14 @@ class GameScene extends Phaser.Scene {
         const padH = 4;
         const rect = new Phaser.Geom.Rectangle(b.x - padW / 2, b.y - padH / 2, b.width + padW, b.height + padH);
         hit = Phaser.Geom.Intersects.LineToRectangle(line, rect);
+      } else if (type === 'enemy_snake') {
+        // Use an oriented rectangle aligned to the snake's rotation for accurate tongue hits.
+        // Slightly pad thickness to ensure edge/tongue-tip grazes still count.
+        const ec = e.getCenter();
+        const ang = e.rotation || 0;
+        const w = (e.displayWidth || e.width) * 0.95;         // near full visual length
+        const h = Math.max(10, (e.displayHeight || e.height) * 1.35); // wider thickness to match body
+        hit = this.lineIntersectsOrientedRect(line, ec, w, h, ang);
       } else {
         const ec = e.getCenter();
         const r = e.body ? Math.min(e.body.width, e.body.height) * 0.5 : Math.min(e.displayWidth, e.displayHeight) * this.enemyBodyRadiusFactor;
@@ -1457,6 +1465,59 @@ class GameScene extends Phaser.Scene {
       this.tongue.clear();
       this.tongueTip.setVisible(false);
     });
+  }
+
+  // Accurate line-vs-oriented-rectangle intersection (used for snake tongue hits)
+  lineIntersectsOrientedRect(line, center, width, height, angleRad) {
+    const hw = width / 2;
+    const hh = height / 2;
+
+    const cos = Math.cos(angleRad);
+    const sin = Math.sin(angleRad);
+
+    // Axes: forward (along length) and perpendicular (thickness)
+    const ax = cos, ay = sin;
+    const px = -sin, py = cos;
+
+    const cx = center.x, cy = center.y;
+
+    // Corner points (p0..p3) around the center
+    const p0x = cx - ax * hw - px * hh, p0y = cy - ay * hw - py * hh; // back-left
+    const p1x = cx + ax * hw - px * hh, p1y = cy + ay * hw - py * hh; // front-left
+    const p2x = cx + ax * hw + px * hh, p2y = cy + ay * hw + py * hh; // front-right
+    const p3x = cx - ax * hw + px * hh, p3y = cy - ay * hw + py * hh; // back-right
+
+    const t1 = new Phaser.Geom.Triangle(p0x, p0y, p1x, p1y, p2x, p2y);
+    const t2 = new Phaser.Geom.Triangle(p0x, p0y, p2x, p2y, p3x, p3y);
+
+    // Phaser 3.60 doesn't expose LineToTriangle; use robust fallback
+    if (!this._diagLoggedNoLTT && !(Phaser.Geom.Intersects && Phaser.Geom.Intersects.LineToTriangle)) {
+      this._diagLoggedNoLTT = true;
+      try {
+        console.warn('[Geom] Phaser.Geom.Intersects.LineToTriangle missing; using fallback line-vs-triangle test');
+      } catch (e) {}
+    }
+
+    return this.lineIntersectsTriangle(line, t1) || this.lineIntersectsTriangle(line, t2);
+  }
+
+  // Fallback: robust line-segment vs triangle intersection compatible with Phaser 3.60+
+  lineIntersectsTriangle(line, tri) {
+    if (!line || !tri) return false;
+
+    // If either endpoint lies inside the triangle, it's an intersection
+    if (Phaser.Geom.Triangle.Contains(tri, line.x1, line.y1) || Phaser.Geom.Triangle.Contains(tri, line.x2, line.y2)) {
+      return true;
+    }
+
+    // Check against each triangle edge as a segment
+    const e1 = new Phaser.Geom.Line(tri.x1, tri.y1, tri.x2, tri.y2);
+    const e2 = new Phaser.Geom.Line(tri.x2, tri.y2, tri.x3, tri.y3);
+    const e3 = new Phaser.Geom.Line(tri.x3, tri.y3, tri.x1, tri.y1);
+
+    return Phaser.Geom.Intersects.LineToLine(line, e1)
+        || Phaser.Geom.Intersects.LineToLine(line, e2)
+        || Phaser.Geom.Intersects.LineToLine(line, e3);
   }
 
   performSprayAttack() {
