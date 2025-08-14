@@ -14,6 +14,29 @@ class GameScene extends Phaser.Scene {
     this.shooterProjectileSpeed = 260;
     this.shooterMinCooldown = 900; // ms
     this.shooterMaxCooldown = 1600; // ms
+
+    // Spider behavior + traps
+    this.spiderMinSpeed = 28;
+    this.spiderMaxSpeed = 55;
+    // Turn less often to travel farther between course corrections
+    this.spiderTurnIntervalMin = 1000;  // ms
+    this.spiderTurnIntervalMax = 15000;  // ms
+    // Slow trap laying so webs are more spaced out
+    this.spiderWebCooldownMin = 5000;   // ms
+    this.spiderWebCooldownMax = 10000;   // ms
+    this.spiderWalkSwapInterval = 110;  // ms between leg frames while moving
+    this.spiderContactDamage = 1;
+    // Cap simultaneous spiders and limit per-turn heading change for smoother wandering
+    this.maxActiveSpiders = 2;
+    this.spiderTurnMaxDeltaDeg = 35;
+
+    // Web traps and slow effect
+    this.webTraps = null;
+    this.maxActiveWebTraps = 5;
+    this.slowMultiplier = 0.5;   // 50% speed while slowed
+    this.slowUntil = 0;
+    this.webOverlay = null;
+
     // Wasp spawning control
     this.waspsUnlocked = false;     // locked until threshold
     this.maxActiveWasps = 5;        // cap simultaneous wasps
@@ -578,6 +601,84 @@ class GameScene extends Phaser.Scene {
       cg.destroy();
     }
 
+    // Enemies: spider (wanderer) - two frames for leg scuttle
+    {
+      const makeSpider = (key, legOffset = 0) => {
+        const sg = this.make.graphics({ x: 0, y: 0, add: false });
+        const W = 40, H = 32;
+        // Body (abdomen + cephalothorax)
+        sg.fillStyle(0x1b1b1b, 1);
+        sg.fillEllipse(22, 16, 22, 16); // abdomen
+        sg.fillStyle(0x2a2a2a, 1);
+        sg.fillEllipse(14, 16, 12, 10); // thorax
+        // Eye glint
+        sg.fillStyle(0xffffff, 0.7);
+        sg.fillCircle(11, 13, 1.2);
+        // Legs (8) - animate via angle/length offset
+        sg.lineStyle(2, 0x111111, 1);
+        const cx = 16, cy = 16;
+        for (let i = 0; i < 4; i++) {
+          const baseAng = (-Math.PI * 0.55) + i * (Math.PI * 0.22);
+          const mirror = -baseAng;
+          const amp = 0.25;
+          const delta = (i % 2 === 0 ? 1 : -1) * amp * legOffset;
+          const a1 = baseAng + delta;
+          const a2 = mirror - delta;
+          const len = 12 + i * 1.5;
+          const p1x = cx + Math.cos(a1) * 8;
+          const p1y = cy + Math.sin(a1) * 6;
+          const p2x = p1x + Math.cos(a1) * len;
+          const p2y = p1y + Math.sin(a1) * len;
+          const q1x = cx + Math.cos(a2) * 8;
+          const q1y = cy + Math.sin(a2) * 6;
+          const q2x = q1x + Math.cos(a2) * len;
+          const q2y = q1y + Math.sin(a2) * len;
+          sg.beginPath(); sg.moveTo(p1x, p1y); sg.lineTo(p2x, p2y); sg.strokePath();
+          sg.beginPath(); sg.moveTo(q1x, q1y); sg.lineTo(q2x, q2y); sg.strokePath();
+        }
+        // Subtle highlight
+        sg.fillStyle(0x444444, 0.35);
+        sg.fillEllipse(22, 12, 16, 6);
+        // Outline
+        sg.lineStyle(1, 0x0d0d0d, 0.6);
+        sg.strokeEllipse(22, 16, 22, 16);
+        sg.strokeEllipse(14, 16, 12, 10);
+        sg.generateTexture(key, W, H);
+        sg.destroy();
+      };
+      makeSpider('enemy_spider_1', 1);
+      makeSpider('enemy_spider_2', -1);
+    }
+
+    // Web trap (static)
+    {
+      const w = this.make.graphics({ x: 0, y: 0, add: false });
+      const W = 40, H = 40;
+      const cx = W / 2, cy = H / 2;
+      w.clear();
+      w.lineStyle(2, 0xffffff, 0.9);
+      // Radials
+      const spokes = 8;
+      for (let i = 0; i < spokes; i++) {
+        const ang = (Math.PI * 2 / spokes) * i;
+        w.beginPath();
+        w.moveTo(cx, cy);
+        w.lineTo(cx + Math.cos(ang) * (W * 0.46), cy + Math.sin(ang) * (H * 0.46));
+        w.strokePath();
+      }
+      // Rings
+      const rings = [0.15, 0.32, 0.48, 0.64, 0.78];
+      for (const r of rings) {
+        w.beginPath();
+        w.strokeCircle(cx, cy, Math.min(W, H) * r * 0.5);
+      }
+      // Soft glow
+      w.fillStyle(0xffffff, 0.06);
+      w.fillCircle(cx, cy, 18);
+      w.generateTexture('web_trap', W, H);
+      w.destroy();
+    }
+    
     // Projectile: stinger
     {
       const pg = this.make.graphics({ x: 0, y: 0, add: false });
@@ -745,6 +846,7 @@ class GameScene extends Phaser.Scene {
     this.tongueRange = 120;
     this.attackCooldown = 220;
     this.lastAttackTime = 0;
+    this.slowUntil = 0;
     this.lastDirection = new Phaser.Math.Vector2(1, 0);
     this.sprayUses = 0;
     this.nextAllowedSpawnAt = 0;
@@ -862,6 +964,10 @@ class GameScene extends Phaser.Scene {
     this.sprayCanOverlay = this.add.image(this.player.x, this.player.y, 'spray_can').setVisible(false);
     this.sprayCanOverlay.setDepth(11);
     this.sprayCanOverlay.setScale(0.8);
+
+    // Web slow overlay (visual cue while slowed)
+    this.webOverlay = this.add.image(this.player.x, this.player.y, 'web_trap').setVisible(false);
+    this.webOverlay.setDepth(12).setScale(0.7).setAlpha(0.6);
     
     // Input
     this.cursors = this.input.keyboard.createCursorKeys();
@@ -933,6 +1039,10 @@ class GameScene extends Phaser.Scene {
     // Spray can pickups
     this.sprayCans = this.physics.add.group({ allowGravity: false, immovable: true });
     this.physics.add.overlap(this.player, this.sprayCans, this.onPlayerSprayOverlap, null, this);
+
+    // Web traps (spider hazards)
+    this.webTraps = this.physics.add.group({ allowGravity: false, immovable: true });
+    this.physics.add.overlap(this.player, this.webTraps, this.onPlayerWebOverlap, null, this);
     
     // Text UI
     this.killsText = this.add.text(8, 8, 'Kills: 0', {
@@ -989,7 +1099,7 @@ class GameScene extends Phaser.Scene {
     const now = this.time.now;
    
     // Movement
-    const speed = this.isDead ? 0 : this.speed;
+    const speed = this.isDead ? 0 : this.getCurrentSpeed(now);
     let vx = 0;
     let vy = 0;
     if (this.cursors.left.isDown) vx -= speed;
@@ -1022,6 +1132,13 @@ class GameScene extends Phaser.Scene {
       this.sprayCanOverlay.setPosition(this.player.x + handOffset.x, this.player.y + handOffset.y);
       this.sprayCanOverlay.setRotation(angle + 0.2);
       this.sprayCanOverlay.setVisible(this.sprayUses > 0);
+    }
+
+    // Web slow overlay follows player while slowed
+    if (this.webOverlay) {
+      this.webOverlay.setPosition(this.player.x, this.player.y);
+      this.webOverlay.setRotation(angle);
+      this.webOverlay.setVisible(now < this.slowUntil);
     }
     
     // Invulnerability blink
@@ -1056,6 +1173,8 @@ class GameScene extends Phaser.Scene {
           this.updateFlyAI(e, now);
         } else if (type === 'enemy_beetle' || type === 'enemy_caterpillar') {
           this.updateTankAI(e, now);
+        } else if (type === 'enemy_spider') {
+          this.updateSpiderAI(e, now);
         }
       }
     }
@@ -1700,6 +1819,112 @@ class GameScene extends Phaser.Scene {
     enemy.setRotation(Math.atan2(dir.y, dir.x) + Math.PI);
   }
 
+  // Spider: random wanderer AI + web laying
+  updateSpiderAI(enemy, now) {
+    if (!enemy || !enemy.body) return;
+
+    // Re-pick direction at intervals (smaller heading changes for smoother, longer runs)
+    const nextTurnAt = enemy.getData('nextTurnAt') || 0;
+    if (now >= nextTurnAt) {
+      const prev = enemy.getData('dirAngle');
+      const maxTurn = Phaser.Math.DegToRad(this.spiderTurnMaxDeltaDeg != null ? this.spiderTurnMaxDeltaDeg : 35);
+      const delta = Phaser.Math.FloatBetween(-maxTurn, maxTurn);
+      const baseAng = (prev != null) ? prev : Phaser.Math.FloatBetween(-Math.PI, Math.PI);
+      const ang = Phaser.Math.Angle.Wrap(baseAng + delta);
+
+      const baseSp = Phaser.Math.Between(this.spiderMinSpeed || 28, this.spiderMaxSpeed || 55);
+      const sp = Math.max(10, Math.floor(baseSp * (this.enemySpeedScale || 1)));
+      enemy.setData('speed', sp);
+      enemy.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp);
+      enemy.setData('dirAngle', ang);
+
+      const dt = Phaser.Math.Between(this.spiderTurnIntervalMin || 700, this.spiderTurnIntervalMax || 1600);
+      enemy.setData('nextTurnAt', now + dt);
+    }
+
+    // Face movement direction
+    const v = enemy.body.velocity || { x: 0, y: 0 };
+    const vlen = Math.hypot(v.x, v.y);
+    if (vlen > 0.01) {
+      enemy.setRotation(Math.atan2(v.y, v.x) + Math.PI);
+    }
+
+    // Legs scuttle animation while moving
+    if (vlen > 5) {
+      const swapAt = enemy.getData('walkSwapAt') || 0;
+      if (now >= swapAt) {
+        const frame = enemy.getData('frame') === 2 ? 1 : 2;
+        enemy.setTexture(frame === 1 ? 'enemy_spider_1' : 'enemy_spider_2');
+        enemy.setData('frame', frame);
+        enemy.setData('walkSwapAt', now + (this.spiderWalkSwapInterval || 110));
+      }
+    }
+
+    // Periodically drop webs
+    const nextWebAt = enemy.getData('nextWebAt') || 0;
+    if (now >= nextWebAt) {
+      this.spawnWebTrap(enemy.x, enemy.y);
+      const cd = Phaser.Math.Between(this.spiderWebCooldownMin || 1400, this.spiderWebCooldownMax || 2600);
+      enemy.setData('nextWebAt', now + cd);
+    }
+  }
+
+  // Return current movement speed, considering slow debuffs
+  getCurrentSpeed(now) {
+    const base = this.speed || 0;
+    if (now < (this.slowUntil || 0)) {
+      const mult = this.slowMultiplier != null ? this.slowMultiplier : 0.5;
+      return Math.floor(base * mult);
+    }
+    return base;
+  }
+
+  // Spawn a web trap at x,y with cap enforcement
+  spawnWebTrap(x, y) {
+    if (!this.webTraps) return null;
+    // Enforce cap
+    const kids = this.webTraps.getChildren ? this.webTraps.getChildren() : [];
+    const active = kids.filter(w => w && w.active);
+    if (active.length >= (this.maxActiveWebTraps || 5)) {
+      // Destroy oldest by spawn time; fallback to first
+      let oldest = null;
+      let bestT = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < active.length; i++) {
+        const w = active[i];
+        const t = (w.getData && w.getData('spawnedAt')) || 0;
+        if (t < bestT) { bestT = t; oldest = w; }
+      }
+      if (!oldest && active.length > 0) oldest = active[0];
+      if (oldest && oldest.destroy) oldest.destroy();
+    }
+    const web = this.webTraps.create(x, y, 'web_trap');
+    web.setDepth(2);
+    if (web.body && web.body.setCircle) {
+      const r = Math.floor(Math.min(web.width, web.height) * 0.38);
+      const ox = (web.width / 2) - r;
+      const oy = (web.height / 2) - r;
+      web.body.setCircle(r, ox, oy);
+      web.body.setAllowGravity(false);
+      web.body.immovable = true;
+      web.body.setBounce(0, 0);
+      web.setVelocity(0, 0);
+    }
+    if (web.setAngle) web.setAngle(Phaser.Math.Between(0, 360));
+    web.setData('spawnedAt', this.time.now);
+    return web;
+  }
+
+  // Web trap overlap -> apply slow and consume
+  onPlayerWebOverlap(player, web) {
+    if (!web || !web.active) return;
+    const now = this.time.now;
+    // 3 seconds slow; extend if re-applied
+    this.slowUntil = Math.max(this.slowUntil || 0, now + 3000);
+    // Consume web
+    if (this.sfxOn) this.sfxPickup();
+    web.destroy();
+  }
+
   onShelterEnemyOverlap(shelter, enemy) {
     if (!enemy || !enemy.active || this.isGameOver) return;
     const t = enemy.getData && enemy.getData('type');
@@ -1830,17 +2055,22 @@ class GameScene extends Phaser.Scene {
     const x = Phaser.Math.Between(margin, this.worldWidth - margin);
     const y = Phaser.Math.Between(margin, this.worldHeight - margin);
 
-    // Count wasps for cap and pick weighted type
+    // Count wasps/spiders for caps and pick weighted type
     let waspCount = 0;
+    let spiderCount = 0;
     if (this.enemies && this.enemies.getChildren) {
       const cs = this.enemies.getChildren();
       for (let i = 0; i < cs.length; i++) {
         const c = cs[i];
-        if (c && c.active && c.getData && c.getData('type') === 'enemy_wasp') waspCount++;
+        if (!c || !c.active || !c.getData) continue;
+        const t = c.getData('type');
+        if (t === 'enemy_wasp') waspCount++;
+        else if (t === 'enemy_spider') spiderCount++;
       }
     }
-    const type = this.chooseEnemyType ? this.chooseEnemyType(waspCount) : 'enemy_fly';
-    const enemy = this.enemies.create(x, y, type);
+    const type = this.chooseEnemyType ? this.chooseEnemyType(waspCount, spiderCount) : 'enemy_fly';
+    const texKey = (type === 'enemy_spider') ? 'enemy_spider_1' : type;
+    const enemy = this.enemies.create(x, y, texKey);
     enemy.setData('type', type);
     enemy.setCollideWorldBounds(true);
     if (type === 'enemy_wasp') {
@@ -1920,6 +2150,20 @@ class GameScene extends Phaser.Scene {
         repeat: -1,
         ease: 'Sine.easeInOut'
       });
+    } else if (type === 'enemy_spider') {
+      hp = 1;
+      contactDamage = this.spiderContactDamage != null ? this.spiderContactDamage : 1;
+      const baseSp = Phaser.Math.Between(this.spiderMinSpeed || 28, this.spiderMaxSpeed || 55);
+      const sp = Math.max(10, Math.floor(baseSp * (this.enemySpeedScale || 1)));
+      enemy.setData('speed', sp);
+      const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
+      enemy.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp);
+      enemy.setData('dirAngle', ang);
+      enemy.setData('frame', 1);
+      const now = this.time.now;
+      enemy.setData('walkSwapAt', now + (this.spiderWalkSwapInterval || 110));
+      enemy.setData('nextTurnAt', now + Phaser.Math.Between(this.spiderTurnIntervalMin || 700, this.spiderTurnIntervalMax || 1600));
+      enemy.setData('nextWebAt', now + Phaser.Math.Between(this.spiderWebCooldownMin || 1400, this.spiderWebCooldownMax || 2600));
     } else {
       // enemy_wasp: ranged pursuer
       enemy.setVelocity(0, 0);
@@ -2725,7 +2969,7 @@ class GameScene extends Phaser.Scene {
   }
 
   // Weighted enemy selection that evolves with kills and respects wasp caps
-  chooseEnemyType(waspCount = 0) {
+  chooseEnemyType(waspCount = 0, spiderCount = 0) {
     const k = this.enemiesDefeated || 0;
     let weights;
     if (k < 5) {
@@ -2759,6 +3003,13 @@ class GameScene extends Phaser.Scene {
     } else {
       weights.enemy_ant = 3;
     }
+    // Add spider weights (random wanderers that lay webs)
+    const spiderWeight = (k < 5) ? 1 : (k < 16) ? 2 : 3;
+    weights.enemy_spider = (weights.enemy_spider || 0) + spiderWeight;
+
+    const canSpawnSpider = spiderCount < (this.maxActiveSpiders || 2);
+    if (!canSpawnSpider) weights.enemy_spider = 0;
+
     const bag = [];
     for (const [key, w] of Object.entries(weights)) {
       for (let i = 0; i < w; i++) bag.push(key);
