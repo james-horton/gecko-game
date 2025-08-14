@@ -79,6 +79,13 @@ class GameScene extends Phaser.Scene {
     this.worldWidth = 800;
     this.worldHeight = 600;
 
+    // Spawn safety (prevent enemies from spawning on/too close to player or shelter)
+    this.spawnMinDistPlayer = 140;
+    this.spawnMinDistShelter = 120;
+    this.spawnMaxAttempts = 20;
+    // Boss spawn safety
+    this.bossMinDistFromPlayer = 200;
+
     // Combat / Health
     this.maxHealth = 5;
     this.health = this.maxHealth;
@@ -2219,9 +2226,31 @@ class GameScene extends Phaser.Scene {
     const cap = this.maxActiveEnemies != null ? this.maxActiveEnemies : 8;
     if (activeCount >= cap) return null;
 
-    // Spawn position
-    const x = Phaser.Math.Between(margin, this.worldWidth - margin);
-    const y = Phaser.Math.Between(margin, this.worldHeight - margin);
+    // Spawn position (safe: never too close to player or shelter)
+    let sx = null, sy = null;
+    const minPlayer = this.spawnMinDistPlayer != null ? this.spawnMinDistPlayer : 140;
+    const minShelter = this.spawnMinDistShelter != null ? this.spawnMinDistShelter : 120;
+    const attempts = this.spawnMaxAttempts != null ? this.spawnMaxAttempts : 20;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const tx = Phaser.Math.Between(margin, this.worldWidth - margin);
+      const ty = Phaser.Math.Between(margin, this.worldHeight - margin);
+      // Check distance to player
+      let safe = true;
+      if (this.player && typeof this.player.getCenter === 'function') {
+        const pc = this.player.getCenter();
+        const dx = tx - pc.x, dy = ty - pc.y;
+        if (dx*dx + dy*dy < minPlayer * minPlayer) safe = false;
+      }
+      // Check distance to shelter
+      if (safe && this.shelter) {
+        const dx = tx - this.shelter.x, dy = ty - this.shelter.y;
+        if (dx*dx + dy*dy < minShelter * minShelter) safe = false;
+      }
+      if (safe) { sx = tx; sy = ty; break; }
+    }
+    if (sx == null) return null;
+    const x = sx;
+    const y = sy;
 
     // Count wasps/spiders for caps and pick weighted type
     let waspCount = 0;
@@ -3357,7 +3386,29 @@ class GameScene extends Phaser.Scene {
       if (d2 < bestD2) { bestD2 = d2; shelterCornerIdx = i; }
     }
     const pool = corners.filter((_, i) => i !== shelterCornerIdx);
-    const choice = pool[Phaser.Math.Between(0, pool.length - 1)];
+    let choice = pool[Phaser.Math.Between(0, pool.length - 1)];
+    // Keep boss from spawning too close to the player as well
+    if (this.player && this.bossMinDistFromPlayer != null && pool.length > 0) {
+      const pc = this.player.getCenter ? this.player.getCenter() : { x: this.player.x, y: this.player.y };
+      const minD2 = this.bossMinDistFromPlayer * this.bossMinDistFromPlayer;
+      const safe = pool.filter(c => {
+        const dx = c.x - pc.x, dy = c.y - pc.y;
+        return (dx*dx + dy*dy) >= minD2;
+      });
+      if (safe.length > 0) {
+        choice = safe[Phaser.Math.Between(0, safe.length - 1)];
+      } else {
+        // Fallback: choose the farthest corner from the player among allowed corners
+        let best = pool[0];
+        let bestD2 = -1;
+        for (const c of pool) {
+          const dx = c.x - pc.x, dy = c.y - pc.y;
+          const d2 = dx*dx + dy*dy;
+          if (d2 > bestD2) { bestD2 = d2; best = c; }
+        }
+        choice = best;
+      }
+    }
 
     const enemy = this.enemies.create(choice.x, choice.y, 'enemy_boss');
     enemy.setData('type', 'enemy_boss');
