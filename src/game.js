@@ -1489,7 +1489,7 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    // Kill enemies within cone
+    // Damage enemies within cone (1 dmg per enemy per spray)
     const enemies = this.enemies.getChildren();
     let killsThisAttack = 0;
     for (let i = enemies.length - 1; i >= 0; i--) {
@@ -1503,9 +1503,9 @@ class GameScene extends Phaser.Scene {
       const angTo = Math.atan2(dy, dx);
       const delta = Phaser.Math.Angle.Wrap(angTo - angle);
       if (Math.abs(delta) <= half) {
-        // Instant kill
+        // Deal 1 damage (never instant-kill; only kills if target has 1 HP)
         this.hitEmitter.explode(Phaser.Math.Between(8, 12), e.x, e.y);
-        const killed = this.damageEnemy(e, 9999);
+        const killed = this.damageEnemy(e, 1);
         if (killed) killsThisAttack++;
       }
     }
