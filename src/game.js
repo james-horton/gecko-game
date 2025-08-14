@@ -1909,6 +1909,11 @@ class GameScene extends Phaser.Scene {
     // Clear transient refs
     this.tongue = null;
     this.tongueTip = null;
+    // Reset tongue state so graphics and timers are clean on restart
+    this.isAttacking = false;
+    this.tongueActiveUntil = 0;
+    this.tongueDir = new Phaser.Math.Vector2(1, 0);
+    this.tongueLen = this.tongueRange;
     this.upgradeUI = [];
     // Reset hearts UI refs
     this.healthHeartsContainer = null;
@@ -2210,6 +2215,43 @@ class GameScene extends Phaser.Scene {
     if (this.armorOverlay) {
       this.armorOverlay.setAlpha(inv ? 0.55 : (this.isDead ? 0.25 : 0.7));
     }
+
+    // Keep tongue graphics anchored to the mouth while active
+    if (this.isAttacking) {
+      if (now >= (this.tongueActiveUntil || 0)) {
+        if (this.tongue) this.tongue.clear();
+        if (this.tongueTip) this.tongueTip.setVisible(false);
+        this.isAttacking = false;
+        this.tongueActiveUntil = 0;
+      } else {
+        const angNow = Math.atan2(this.lastDirection.y, this.lastDirection.x);
+        const centerNow = this.player.getCenter();
+        // Mouth is around (82,33) in a 96x64 sprite whose center is (48,32) => local offset ~ (+34, +1)
+        const mouthOffsetNow = new Phaser.Math.Vector2(34, 1).rotate(angNow);
+        const sx = centerNow.x + mouthOffsetNow.x;
+        const sy = centerNow.y + mouthOffsetNow.y;
+        const dir = (this.tongueDir && (typeof this.tongueDir.x === 'number' || typeof this.tongueDir.y === 'number'))
+          ? this.tongueDir
+          : this.lastDirection;
+        const len = this.tongueLen || this.tongueRange;
+        const ex = sx + dir.x * len;
+        const ey = sy + dir.y * len;
+
+        this.tongue.clear();
+        this.tongue.lineStyle(12, 0xd94884, 0.9);
+        this.tongue.beginPath();
+        this.tongue.moveTo(sx, sy);
+        this.tongue.lineTo(ex, ey);
+        this.tongue.strokePath();
+        this.tongue.lineStyle(6, 0xff94c2, 1);
+        this.tongue.beginPath();
+        this.tongue.moveTo(sx, sy);
+        this.tongue.lineTo(ex, ey);
+        this.tongue.strokePath();
+
+        this.tongueTip.setPosition(ex, ey).setVisible(true);
+      }
+    }
     
     // Attack input (space)
     if (Phaser.Input.Keyboard.JustDown(this.spaceKey) && !this.isChoosingUpgrade && !this.isDead && !stunned) {
@@ -2332,16 +2374,24 @@ class GameScene extends Phaser.Scene {
     console.debug('[Audio] performTongueAttack', { sfxOn: this.sfxOn, ctxState: this.audioCtx && this.audioCtx.state });
     // SFX
     if (this.sfxOn) this.sfxTongue();
-    // Draw attack with layered color for depth
-    // Compute mouth world position (offset from sprite center, rotated to face lastDirection)
+
+    // Compute attack direction and mouth position at the moment of attack
     const angle = Math.atan2(this.lastDirection.y, this.lastDirection.x);
     const center = this.player.getCenter();
     // Mouth is around (82,33) in a 96x64 sprite whose center is (48,32) => local offset ~ (+34, +1)
     const mouthOffset = new Phaser.Math.Vector2(34, 1).rotate(angle);
     const start = new Phaser.Math.Vector2(center.x + mouthOffset.x, center.y + mouthOffset.y);
     const len = this.tongueRange;
-    const end = new Phaser.Math.Vector2(start.x + this.lastDirection.x * len, start.y + this.lastDirection.y * len);
+    const dir = new Phaser.Math.Vector2(this.lastDirection.x, this.lastDirection.y).normalize();
+    const end = new Phaser.Math.Vector2(start.x + dir.x * len, start.y + dir.y * len);
 
+    // Activate tongue state so the base remains anchored to the mouth while moving
+    this.isAttacking = true;
+    this.tongueDir = dir;
+    this.tongueLen = len;
+    this.tongueActiveUntil = this.time.now + 160;
+
+    // Initial draw (subsequent frames are redrawn in update())
     this.tongue.clear();
     this.tongue.lineStyle(12, 0xd94884, 0.9);
     this.tongue.beginPath();
@@ -2353,11 +2403,9 @@ class GameScene extends Phaser.Scene {
     this.tongue.moveTo(start.x, start.y);
     this.tongue.lineTo(end.x, end.y);
     this.tongue.strokePath();
-
-    // Tongue tip
     this.tongueTip.setPosition(end.x, end.y).setVisible(true);
 
-    // Damage enemies along line
+    // Damage enemies along the initial line
     const line = new Phaser.Geom.Line(start.x, start.y, end.x, end.y);
     const enemies = this.enemies.getChildren();
     let killsThisAttack = 0;
@@ -2368,19 +2416,16 @@ class GameScene extends Phaser.Scene {
       const type = e.getData && e.getData('type');
       let hit = false;
       if (type === 'enemy_caterpillar') {
-        // Use expanded axis-aligned rectangle for elongated body (wider head/tail coverage)
         const b = e.getBounds();
         const padW = 8;
         const padH = 4;
         const rect = new Phaser.Geom.Rectangle(b.x - padW / 2, b.y - padH / 2, b.width + padW, b.height + padH);
         hit = Phaser.Geom.Intersects.LineToRectangle(line, rect);
       } else if (type === 'enemy_snake') {
-        // Use an oriented rectangle aligned to the snake's rotation for accurate tongue hits.
-        // Slightly pad thickness to ensure edge/tongue-tip grazes still count.
         const ec = e.getCenter();
         const ang = e.rotation || 0;
-        const w = (e.displayWidth || e.width) * 0.95;         // near full visual length
-        const h = Math.max(10, (e.displayHeight || e.height) * 1.35); // wider thickness to match body
+        const w = (e.displayWidth || e.width) * 0.95;
+        const h = Math.max(10, (e.displayHeight || e.height) * 1.35);
         hit = this.lineIntersectsOrientedRect(line, ec, w, h, ang);
       } else {
         const ec = e.getCenter();
@@ -2388,11 +2433,10 @@ class GameScene extends Phaser.Scene {
         hit = Phaser.Geom.Intersects.LineToCircle(line, new Phaser.Geom.Circle(ec.x, ec.y, r));
       }
       if (hit) {
-        // Hit FX each time
         this.hitEmitter.explode(Phaser.Math.Between(8, 12), e.x, e.y);
         this.cameras.main.shake(100, 0.004);
         if (this.sfxOn) this.sfxHit();
-  
+
         const killed = this.damageEnemy(e, 1);
         if (killed) {
           killsThisAttack++;
@@ -2404,12 +2448,6 @@ class GameScene extends Phaser.Scene {
     if (killsThisAttack > 0 && this.enemiesDefeated % 10 === 0 && !this.isChoosingUpgrade) {
       this.showUpgradeSelection();
     }
-
-    // Retract tongue shortly after
-    this.time.delayedCall(160, () => {
-      this.tongue.clear();
-      this.tongueTip.setVisible(false);
-    });
   }
 
   // Accurate line-vs-oriented-rectangle intersection (used for snake tongue hits)
@@ -3815,7 +3853,7 @@ class GameScene extends Phaser.Scene {
       { type: 'speed', value: 60, description: 'Faster Movement Speed' },
       { type: 'tongue', value: 80, description: 'Longer Tongue' },
       { type: 'attack', value: 0.25, description: 'Faster Attack' },
-      { type: 'max_health', value: 3, description: 'More Health' }
+      { type: 'max_health', value: 1, description: 'More Health' }
     ];
     // Offer shelter upgrade if not at max level
     if ((this.shelterLevel || 1) < (this.maxShelterLevel || 3)) {
